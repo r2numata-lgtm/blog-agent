@@ -1,7 +1,7 @@
 # フロントエンド設計
 
-**ドキュメントバージョン**: 1.0  
-**最終更新日**: 2024-12-03  
+**ドキュメントバージョン**: 1.1  
+**最終更新日**: 2025-01-03  
 **関連ドキュメント**: 02_architecture.md, 01_requirements.md
 
 ---
@@ -101,33 +101,33 @@
 ### 2. 記事生成画面（/editor）
 
 ```
-┌──────────────────────────────────────────┐
-│  Header                                  │
-│  [Logo] [保存] [HTML出力] [ユーザー]     │
-├──────────────────┬───────────────────────┤
-│                  │                       │
-│  入力フォーム     │                       │
-│  ┌─────────────┐ │                       │
-│  │タイトル      │ │                       │
-│  │対象読者      │ │                       │
-│  │キーワード    │ │   プレビューエリア     │
-│  │本文要点      │ │                       │
-│  │文字数        │ │                       │
-│  └─────────────┘ │                       │
-│  [生成ボタン]     │                       │
-│                  │                       │
-├──────────────────┤                       │
-│                  │                       │
-│  エディタ         │                       │
-│  ┌─────────────┐ │                       │
-│  │Markdown      │ │                       │
-│  │エディタ      │ │                       │
-│  │             │ │                       │
-│  │             │ │                       │
-│  └─────────────┘ │                       │
-│  [装飾ツールバー] │                       │
-│                  │                       │
-└──────────────────┴───────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Header                                                  │
+│  [Logo] [保存] [Markdown出力] [HTML出力] [ユーザー]      │
+├──────────────────┬───────────────────────────────────────┤
+│                  │                                       │
+│  入力フォーム     │                                       │
+│  ┌─────────────┐ │                                       │
+│  │タイトル      │ │                                       │
+│  │対象読者      │ │                                       │
+│  │キーワード    │ │   プレビューエリア                     │
+│  │本文要点      │ │                                       │
+│  │文字数        │ │                                       │
+│  └─────────────┘ │                                       │
+│  [生成ボタン]     │                                       │
+│                  │                                       │
+├──────────────────┤                                       │
+│                  │                                       │
+│  エディタ         │                                       │
+│  ┌─────────────┐ │                                       │
+│  │Markdown      │ │                                       │
+│  │エディタ      │ │                                       │
+│  │             │ │                                       │
+│  │             │ │                                       │
+│  └─────────────┘ │                                       │
+│  [装飾ツールバー] │                                       │
+│                  │                                       │
+└──────────────────┴───────────────────────────────────────┘
 ```
 
 **レイアウト詳細**
@@ -197,6 +197,16 @@ src/
 │   │       ├── ArticleForm.tsx
 │   │       └── FormField.tsx
 │   │
+│   ├── export/              # 出力関連
+│   │   ├── ExportPanel/
+│   │   │   ├── ExportPanel.tsx
+│   │   │   ├── FormatSelector.tsx
+│   │   │   └── ExportButton.tsx
+│   │   └── converters/
+│   │       ├── markdownConverter.ts
+│   │       ├── htmlConverter.ts
+│   │       └── gutenbergConverter.ts (Phase 2)
+│   │
 │   ├── article/             # 記事関連
 │   │   ├── ArticleCard/
 │   │   │   ├── ArticleCard.tsx
@@ -210,6 +220,10 @@ src/
 │       ├── MainLayout/
 │       ├── EditorLayout/
 │       └── AuthLayout/
+│
+├── utils/
+│   ├── fileDownload.ts      # ファイルダウンロード処理
+│   └── formatDate.ts        # 日付フォーマット
 ```
 
 ---
@@ -359,6 +373,323 @@ export const DecorationToolbar: React.FC<DecorationToolbarProps> = ({
       ))}
     </div>
   );
+};
+```
+
+---
+
+### ExportPanel コンポーネント
+
+**Props定義**
+```typescript
+interface ExportPanelProps {
+  markdown: string;
+  title: string;
+  onExport: (format: ExportFormat) => void;
+}
+
+type ExportFormat = 'markdown' | 'html' | 'gutenberg';
+```
+
+**使用例**
+```tsx
+<ExportPanel 
+  markdown={currentMarkdown}
+  title={articleTitle}
+  onExport={handleExport}
+/>
+```
+
+**実装**
+```tsx
+import { convertToHTML } from '../converters/htmlConverter';
+import { convertToMarkdown } from '../converters/markdownConverter';
+import { downloadFile, formatDate } from '@/utils/fileDownload';
+import { toast } from 'react-hot-toast';
+
+export const ExportPanel: React.FC<ExportPanelProps> = ({
+  markdown,
+  title,
+  onExport
+}) => {
+  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('markdown');
+
+  const handleDownload = () => {
+    let content: string;
+    let filename: string;
+    let mimeType: string;
+
+    switch(selectedFormat) {
+      case 'markdown':
+        content = convertToMarkdown(markdown);
+        filename = `${title}_${formatDate()}.md`;
+        mimeType = 'text/markdown';
+        break;
+      
+      case 'html':
+        content = convertToHTML(markdown);
+        filename = `${title}_${formatDate()}.html`;
+        mimeType = 'text/html';
+        break;
+      
+      case 'gutenberg':
+        content = convertToGutenberg(markdown);
+        filename = `${title}_${formatDate()}.html`;
+        mimeType = 'text/html';
+        break;
+    }
+
+    downloadFile(content, filename, mimeType);
+    onExport(selectedFormat);
+  };
+
+  const handleCopy = async () => {
+    let content: string;
+    
+    switch(selectedFormat) {
+      case 'markdown':
+        content = convertToMarkdown(markdown);
+        break;
+      case 'html':
+        content = convertToHTML(markdown);
+        break;
+      case 'gutenberg':
+        content = convertToGutenberg(markdown);
+        break;
+    }
+
+    await navigator.clipboard.writeText(content);
+    toast.success('クリップボードにコピーしました');
+  };
+
+  return (
+    <div className="export-panel bg-white rounded-lg shadow p-6">
+      <h3 className="text-lg font-semibold mb-4">出力形式を選択</h3>
+      
+      <div className="format-selector flex gap-2 mb-4">
+        <button
+          className={`px-4 py-2 rounded ${
+            selectedFormat === 'markdown' 
+              ? 'bg-primary text-white' 
+              : 'bg-gray-100 text-gray-700'
+          }`}
+          onClick={() => setSelectedFormat('markdown')}
+        >
+          📄 Markdown（推奨）
+        </button>
+        
+        <button
+          className={`px-4 py-2 rounded ${
+            selectedFormat === 'html' 
+              ? 'bg-primary text-white' 
+              : 'bg-gray-100 text-gray-700'
+          }`}
+          onClick={() => setSelectedFormat('html')}
+        >
+          🌐 汎用HTML
+        </button>
+        
+        {/* Phase 2で追加
+        <button
+          className={`px-4 py-2 rounded ${
+            selectedFormat === 'gutenberg' 
+              ? 'bg-primary text-white' 
+              : 'bg-gray-100 text-gray-700'
+          }`}
+          onClick={() => setSelectedFormat('gutenberg')}
+        >
+          📦 Gutenberg
+        </button>
+        */}
+      </div>
+
+      <div className="format-description mb-4 p-3 bg-gray-50 rounded text-sm">
+        {selectedFormat === 'markdown' && (
+          <p>
+            <strong className="text-success">推奨:</strong> WordPressに
+            <a 
+              href="https://jetpack.com/support/markdown/" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-primary underline ml-1"
+            >
+              Jetpack Markdown
+            </a>
+            プラグインを導入してご使用ください。
+          </p>
+        )}
+        {selectedFormat === 'html' && (
+          <p className="text-gray-600">
+            どのWordPressテーマでも動作しますが、テーマのデザインと合わない場合があります。
+          </p>
+        )}
+      </div>
+
+      <div className="export-actions flex gap-3">
+        <Button variant="primary" onClick={handleDownload}>
+          ⬇️ ダウンロード
+        </Button>
+        
+        <Button variant="secondary" onClick={handleCopy}>
+          📋 コピー
+        </Button>
+      </div>
+    </div>
+  );
+};
+```
+
+---
+
+## 🔌 変換ロジックの実装
+
+### htmlConverter.ts
+
+```typescript
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+/**
+ * Markdownを汎用HTML（インラインCSS付き）に変換
+ */
+export const convertToHTML = (markdown: string): string => {
+  // カスタムボックスの変換
+  const processedMarkdown = markdown
+    .replace(
+      /:::box type="info"\n([\s\S]*?)\n:::/g,
+      (_, content) => `<div class="custom-box custom-box-info" style="background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 16px; margin: 16px 0; border-radius: 4px;">${content.trim()}</div>`
+    )
+    .replace(
+      /:::box type="warning"\n([\s\S]*?)\n:::/g,
+      (_, content) => `<div class="custom-box custom-box-warning" style="background-color: #fff3e0; border-left: 4px solid #ff9800; padding: 16px; margin: 16px 0; border-radius: 4px;">${content.trim()}</div>`
+    )
+    .replace(
+      /:::box type="success"\n([\s\S]*?)\n:::/g,
+      (_, content) => `<div class="custom-box custom-box-success" style="background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 16px; margin: 16px 0; border-radius: 4px;">${content.trim()}</div>`
+    )
+    .replace(
+      /:::box type="error"\n([\s\S]*?)\n:::/g,
+      (_, content) => `<div class="custom-box custom-box-error" style="background-color: #ffebee; border-left: 4px solid #f44336; padding: 16px; margin: 16px 0; border-radius: 4px;">${content.trim()}</div>`
+    );
+
+  // カスタム吹き出しの変換
+  const processedWithBalloons = processedMarkdown
+    .replace(
+      /:::balloon position="left" icon="(.+?)"\n([\s\S]*?)\n:::/g,
+      (_, icon, content) => `
+        <div class="custom-balloon custom-balloon-left" style="position: relative; background: #f5f5f5; border-radius: 8px; padding: 16px; margin: 16px 0 16px 60px;">
+          <span style="position: absolute; left: -50px; top: 0; font-size: 40px;">${icon}</span>
+          ${content.trim()}
+        </div>
+      `
+    )
+    .replace(
+      /:::balloon position="right" icon="(.+?)"\n([\s\S]*?)\n:::/g,
+      (_, icon, content) => `
+        <div class="custom-balloon custom-balloon-right" style="position: relative; background: #e3f2fd; border-radius: 8px; padding: 16px; margin: 16px 60px 16px 0;">
+          <span style="position: absolute; right: -50px; top: 0; font-size: 40px;">${icon}</span>
+          ${content.trim()}
+        </div>
+      `
+    );
+
+  // 標準Markdownの変換
+  const html = marked(processedWithBalloons);
+  
+  // XSS対策
+  const sanitized = DOMPurify.sanitize(html);
+
+  // 完全なHTMLドキュメントとして返す
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>記事HTML</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 24px;
+      margin-bottom: 16px;
+      font-weight: 600;
+      line-height: 1.25;
+    }
+    p {
+      margin-bottom: 16px;
+    }
+    code {
+      background-color: #f6f8fa;
+      padding: 2px 4px;
+      border-radius: 3px;
+      font-size: 85%;
+    }
+    pre {
+      background-color: #f6f8fa;
+      padding: 16px;
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  ${sanitized}
+</body>
+</html>`;
+};
+```
+
+### markdownConverter.ts
+
+```typescript
+/**
+ * Markdown出力（そのまま返すだけだが、将来的な拡張のため関数化）
+ */
+export const convertToMarkdown = (markdown: string): string => {
+  return markdown;
+};
+```
+
+### fileDownload.ts
+
+```typescript
+/**
+ * ファイルダウンロード処理
+ */
+export const downloadFile = (
+  content: string,
+  filename: string,
+  mimeType: string
+): void => {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+/**
+ * 日付フォーマット（YYYYMMDDHHmmss）
+ */
+export const formatDate = (): string => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  
+  return `${year}${month}${day}${hours}${minutes}${seconds}`;
 };
 ```
 
@@ -632,6 +963,6 @@ const debouncedOnChange = useMemo(
 
 ---
 
-**最終更新**: 2024-12-03  
+**最終更新**: 2025-01-03  
 **レビュー者**: れんじろう  
 **次回レビュー**: Phase 2完了時
