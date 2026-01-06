@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
-import { LoginPage, RegisterPage, ConfirmPage } from './pages/auth';
+import { LoginPage, RegisterPage, ConfirmPage, ForgotPasswordPage } from './pages/auth';
 import GutenbergTest from './components/GutenbergTest';
 
 // ダッシュボード（認証後のホーム画面）
@@ -68,6 +68,7 @@ const AppRouter = () => {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/confirm" element={<ConfirmPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
       {/* 保護されたルート */}
       <Route

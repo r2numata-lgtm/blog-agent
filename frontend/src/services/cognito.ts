@@ -201,6 +201,171 @@ export const getIdToken = async (): Promise<string | null> => {
   return session?.getIdToken().getJwtToken() || null;
 };
 
+// トークンをリフレッシュ
+export const refreshSession = (): Promise<CognitoUserSession | null> => {
+  return new Promise((resolve) => {
+    const cognitoUser = userPool.getCurrentUser();
+    if (!cognitoUser) {
+      resolve(null);
+      return;
+    }
+
+    cognitoUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
+      if (err || !session) {
+        resolve(null);
+        return;
+      }
+
+      const refreshToken = session.getRefreshToken();
+      cognitoUser.refreshSession(refreshToken, (refreshErr, newSession) => {
+        if (refreshErr || !newSession) {
+          resolve(null);
+          return;
+        }
+        resolve(newSession);
+      });
+    });
+  });
+};
+
+// トークンの有効期限を確認（5分以内に期限切れならtrue）
+export const isTokenExpiringSoon = async (thresholdMinutes = 5): Promise<boolean> => {
+  const session = await getCurrentSession();
+  if (!session) return true;
+
+  const accessToken = session.getAccessToken();
+  const expiration = accessToken.getExpiration();
+  const now = Math.floor(Date.now() / 1000);
+  const thresholdSeconds = thresholdMinutes * 60;
+
+  return expiration - now < thresholdSeconds;
+};
+
+// 有効なアクセストークンを取得（必要に応じてリフレッシュ）
+export const getValidAccessToken = async (): Promise<string | null> => {
+  const expiringSoon = await isTokenExpiringSoon();
+
+  if (expiringSoon) {
+    const newSession = await refreshSession();
+    if (newSession) {
+      return newSession.getAccessToken().getJwtToken();
+    }
+    return null;
+  }
+
+  return getAccessToken();
+};
+
+// 有効なIDトークンを取得（必要に応じてリフレッシュ）
+export const getValidIdToken = async (): Promise<string | null> => {
+  const expiringSoon = await isTokenExpiringSoon();
+
+  if (expiringSoon) {
+    const newSession = await refreshSession();
+    if (newSession) {
+      return newSession.getIdToken().getJwtToken();
+    }
+    return null;
+  }
+
+  return getIdToken();
+};
+
+// パスワードリセットを開始（確認コードをメールに送信）
+export const forgotPassword = (email: string): Promise<AuthResult> => {
+  return new Promise((resolve) => {
+    const cognitoUser = new CognitoUser({
+      Username: email,
+      Pool: userPool,
+    });
+
+    cognitoUser.forgotPassword({
+      onSuccess: () => {
+        resolve({
+          success: true,
+          message: 'パスワードリセットコードをメールに送信しました',
+        });
+      },
+      onFailure: (err) => {
+        resolve({
+          success: false,
+          message: getErrorMessage(err),
+        });
+      },
+    });
+  });
+};
+
+// 新しいパスワードを設定（確認コードを使用）
+export const confirmForgotPassword = (
+  email: string,
+  code: string,
+  newPassword: string
+): Promise<AuthResult> => {
+  return new Promise((resolve) => {
+    const cognitoUser = new CognitoUser({
+      Username: email,
+      Pool: userPool,
+    });
+
+    cognitoUser.confirmPassword(code, newPassword, {
+      onSuccess: () => {
+        resolve({
+          success: true,
+          message: 'パスワードが正常にリセットされました',
+        });
+      },
+      onFailure: (err) => {
+        resolve({
+          success: false,
+          message: getErrorMessage(err),
+        });
+      },
+    });
+  });
+};
+
+// パスワード変更（ログイン中のユーザー）
+export const changePassword = (
+  oldPassword: string,
+  newPassword: string
+): Promise<AuthResult> => {
+  return new Promise((resolve) => {
+    const cognitoUser = userPool.getCurrentUser();
+    if (!cognitoUser) {
+      resolve({
+        success: false,
+        message: 'ログインが必要です',
+      });
+      return;
+    }
+
+    cognitoUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
+      if (err || !session || !session.isValid()) {
+        resolve({
+          success: false,
+          message: 'セッションが無効です',
+        });
+        return;
+      }
+
+      cognitoUser.changePassword(oldPassword, newPassword, (changeErr) => {
+        if (changeErr) {
+          resolve({
+            success: false,
+            message: getErrorMessage(changeErr),
+          });
+          return;
+        }
+        resolve({
+          success: true,
+          message: 'パスワードが正常に変更されました',
+        });
+      });
+    });
+  });
+};
+
 // エラーメッセージの変換
 const getErrorMessage = (err: Error & { code?: string }): string => {
   switch (err.code) {
