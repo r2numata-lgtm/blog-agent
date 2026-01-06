@@ -220,3 +220,70 @@ export const decorationLabels: Record<keyof DecorationSettings, string> = {
   quote: '引用',
   table: '表',
 };
+
+// API連携用の関数（将来的にDynamoDBと同期）
+import api from '../services/api';
+
+export const settingsApi = {
+  // サーバーから設定を読み込み
+  async load(): Promise<UserSettings | null> {
+    try {
+      const store = useSettingsStore.getState();
+      store.setLoading(true);
+      store.setError(null);
+
+      const response = await api.get<{
+        articleStyle: ArticleStyleSettings | null;
+        decorations: DecorationSettings | null;
+        seo: SeoSettings | null;
+        sampleArticles: SampleArticle[];
+      }>('/settings');
+
+      // サーバーからのデータをマージ
+      if (response) {
+        const newSettings: UserSettings = {
+          articleStyle: response.articleStyle || store.settings.articleStyle,
+          decorations: response.decorations || store.settings.decorations,
+          seo: response.seo || store.settings.seo,
+          sampleArticles: response.sampleArticles || [],
+          lastUpdated: new Date().toISOString(),
+        };
+        store.setSettings(newSettings);
+        return newSettings;
+      }
+      return null;
+    } catch (error) {
+      const store = useSettingsStore.getState();
+      store.setError('設定の読み込みに失敗しました');
+      console.error('Failed to load settings:', error);
+      return null;
+    } finally {
+      useSettingsStore.getState().setLoading(false);
+    }
+  },
+
+  // サーバーに設定を保存
+  async save(): Promise<boolean> {
+    try {
+      const store = useSettingsStore.getState();
+      store.setSaving(true);
+      store.setError(null);
+
+      await api.put('/settings', {
+        articleStyle: store.settings.articleStyle,
+        decorations: store.settings.decorations,
+        seo: store.settings.seo,
+        sampleArticles: store.settings.sampleArticles,
+      });
+
+      return true;
+    } catch (error) {
+      const store = useSettingsStore.getState();
+      store.setError('設定の保存に失敗しました');
+      console.error('Failed to save settings:', error);
+      return false;
+    } finally {
+      useSettingsStore.getState().setSaving(false);
+    }
+  },
+};
