@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { LoginPage, RegisterPage, ConfirmPage, ForgotPasswordPage } from './pages/auth';
+import { SettingsPage } from './pages/settings';
 import GutenbergTest from './components/GutenbergTest';
 
 // ダッシュボード（認証後のホーム画面）
@@ -24,6 +25,12 @@ const Dashboard = () => {
               className="text-blue-600 hover:text-blue-800 font-semibold"
             >
               Gutenberg検証
+            </Link>
+            <Link
+              to="/settings"
+              className="text-blue-600 hover:text-blue-800 font-semibold"
+            >
+              設定
             </Link>
           </div>
           <div className="flex items-center gap-4">
@@ -84,6 +91,14 @@ const AppRouter = () => {
         element={
           <ProtectedRoute>
             <GutenbergTest />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <SettingsPage />
           </ProtectedRoute>
         }
       />
