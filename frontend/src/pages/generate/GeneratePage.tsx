@@ -8,7 +8,7 @@
  * P2-13: タイトル選択UI（3案）
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   articleApi,
@@ -16,6 +16,12 @@ import {
   type TitleSuggestion,
   type InternalLink,
 } from '../../services/articleApi';
+import {
+  getErrorMessage,
+  isRetryableError,
+  withRetry,
+  logError,
+} from '../../utils/errorHandler';
 
 // 記事タイプのオプション
 const articleTypes = [
@@ -61,6 +67,8 @@ const GeneratePage: React.FC = () => {
 
   // エラー状態
   const [error, setError] = useState<string | null>(null);
+  const [isErrorRetryable, setIsErrorRetryable] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   // 内部リンク追加（P2-11）
   const addInternalLink = () => {
@@ -77,28 +85,46 @@ const GeneratePage: React.FC = () => {
     setInternalLinks(internalLinks.filter((_, i) => i !== index));
   };
 
+  // エラーをクリア
+  const clearError = useCallback(() => {
+    setError(null);
+    setIsErrorRetryable(false);
+  }, []);
+
   // タイトル案を生成（P2-13）
   const handleGenerateTitles = async () => {
     if (!contentPoints.trim()) {
       setError('本文の要点を入力してください');
+      setIsErrorRetryable(false);
       return;
     }
 
     setIsGeneratingTitles(true);
-    setError(null);
+    clearError();
 
     try {
-      const response = await articleApi.generateTitles({
-        title: title || undefined,
-        targetAudience: targetAudience || undefined,
-        keywords: keywords.split(/[,、\s]+/).filter(Boolean),
-        contentPoints,
-      });
+      const response = await withRetry(
+        () => articleApi.generateTitles({
+          title: title || undefined,
+          targetAudience: targetAudience || undefined,
+          keywords: keywords.split(/[,、\s]+/).filter(Boolean),
+          contentPoints,
+        }),
+        {
+          maxRetries: 2,
+          delayMs: 1000,
+          onRetry: (attempt) => {
+            console.log(`タイトル生成リトライ: ${attempt}回目`);
+          },
+        }
+      );
 
       setTitleSuggestions(response.titles);
       setShowTitleSuggestions(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'タイトル生成に失敗しました');
+      logError(err, 'handleGenerateTitles');
+      setError(getErrorMessage(err));
+      setIsErrorRetryable(isRetryableError(err));
     } finally {
       setIsGeneratingTitles(false);
     }
@@ -111,21 +137,27 @@ const GeneratePage: React.FC = () => {
   };
 
   // 記事を生成（P2-10）
-  const handleGenerate = async () => {
+  const handleGenerate = async (isRetry = false) => {
     // バリデーション
     if (!title.trim()) {
       setError('タイトルを入力してください');
+      setIsErrorRetryable(false);
       return;
     }
     if (!contentPoints.trim()) {
       setError('本文の要点を入力してください');
+      setIsErrorRetryable(false);
       return;
+    }
+
+    if (isRetry) {
+      setRetryCount((prev) => prev + 1);
     }
 
     setIsGenerating(true);
     setGenerationProgress(0);
-    setGenerationStatus('記事を生成中...');
-    setError(null);
+    setGenerationStatus(isRetry ? '再試行中...' : '記事を生成中...');
+    clearError();
 
     // プログレス表示（P2-12）
     const progressInterval = setInterval(() => {
@@ -150,12 +182,22 @@ const GeneratePage: React.FC = () => {
         internalLinks: internalLinks.filter((link) => link.url && link.title),
       };
 
-      const response = await articleApi.generate(request);
+      const response = await withRetry(
+        () => articleApi.generate(request),
+        {
+          maxRetries: 2,
+          delayMs: 2000,
+          onRetry: (attempt) => {
+            setGenerationStatus(`リトライ中 (${attempt}/2)...`);
+          },
+        }
+      );
 
       setGenerationStatus('生成完了！');
       setGenerationProgress(100);
 
       clearInterval(progressInterval);
+      setRetryCount(0);
 
       // 記事編集ページへ遷移
       setTimeout(() => {
@@ -163,8 +205,17 @@ const GeneratePage: React.FC = () => {
       }, 1000);
     } catch (err) {
       clearInterval(progressInterval);
-      setError(err instanceof Error ? err.message : '記事生成に失敗しました');
+      logError(err, 'handleGenerate');
+      setError(getErrorMessage(err));
+      setIsErrorRetryable(isRetryableError(err));
       setIsGenerating(false);
+    }
+  };
+
+  // リトライハンドラー
+  const handleRetry = () => {
+    if (retryCount < 3) {
+      handleGenerate(true);
     }
   };
 
@@ -175,8 +226,36 @@ const GeneratePage: React.FC = () => {
 
         {/* エラー表示 */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-            {error}
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-start justify-between">
+              <div className="flex items-start">
+                <span className="text-red-500 mr-2">⚠️</span>
+                <div>
+                  <p className="text-red-700">{error}</p>
+                  {isErrorRetryable && retryCount < 3 && (
+                    <p className="text-sm text-red-600 mt-1">
+                      一時的なエラーの可能性があります。再試行してください。
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2 ml-4">
+                {isErrorRetryable && retryCount < 3 && (
+                  <button
+                    onClick={handleRetry}
+                    className="px-3 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
+                  >
+                    再試行
+                  </button>
+                )}
+                <button
+                  onClick={clearError}
+                  className="px-3 py-1 text-sm text-red-600 hover:text-red-800"
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -404,7 +483,7 @@ const GeneratePage: React.FC = () => {
           {/* 生成ボタン */}
           <div className="pt-4 border-t">
             <button
-              onClick={handleGenerate}
+              onClick={() => handleGenerate()}
               disabled={isGenerating || !title.trim() || !contentPoints.trim()}
               className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
             >
