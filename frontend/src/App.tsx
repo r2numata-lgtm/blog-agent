@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { LoginPage, RegisterPage, ConfirmPage, ForgotPasswordPage } from './pages/auth';
 import { SettingsPage } from './pages/settings';
+import { GeneratePage } from './pages/generate';
 import GutenbergTest from './components/GutenbergTest';
 
 // ダッシュボード（認証後のホーム画面）
@@ -21,16 +22,22 @@ const Dashboard = () => {
               ホーム
             </Link>
             <Link
-              to="/gutenberg-test"
+              to="/generate"
               className="text-blue-600 hover:text-blue-800 font-semibold"
             >
-              Gutenberg検証
+              記事生成
             </Link>
             <Link
               to="/settings"
               className="text-blue-600 hover:text-blue-800 font-semibold"
             >
               設定
+            </Link>
+            <Link
+              to="/gutenberg-test"
+              className="text-gray-500 hover:text-gray-700 text-sm"
+            >
+              Gutenberg検証
             </Link>
           </div>
           <div className="flex items-center gap-4">
@@ -48,18 +55,18 @@ const Dashboard = () => {
       <div className="max-w-4xl mx-auto p-8">
         <h1 className="text-3xl font-bold mb-4">Blog Agent</h1>
         <p className="text-gray-600 mb-6">
-          ブログ記事生成エージェント - Phase 1
+          ブログ記事生成エージェント - Phase 2
         </p>
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-4">ようこそ！</h2>
           <p className="text-gray-600 mb-4">
-            ログインに成功しました。これから記事生成機能を追加していきます。
+            AIを使って高品質なブログ記事を生成できます。
           </p>
           <Link
-            to="/gutenberg-test"
+            to="/generate"
             className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
           >
-            Gutenberg検証ページへ
+            記事を生成する
           </Link>
         </div>
       </div>
@@ -99,6 +106,14 @@ const AppRouter = () => {
         element={
           <ProtectedRoute>
             <SettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/generate"
+        element={
+          <ProtectedRoute>
+            <GeneratePage />
           </ProtectedRoute>
         }
       />
