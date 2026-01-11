@@ -1,11 +1,6 @@
 /**
  * 記事生成ページ
- * Phase 2: P2-10〜P2-13 フロントエンド実装
- *
- * P2-10: 記事生成フォーム
- * P2-11: 内部リンク入力UI
- * P2-12: プログレス表示（生成中）
- * P2-13: タイトル選択UI（3案）
+ * 新フロー: 入力 → タイトル提案 → タイトル選択 → 記事生成
  */
 
 import React, { useState, useCallback } from 'react';
@@ -16,12 +11,22 @@ import {
   type TitleSuggestion,
   type InternalLink,
 } from '../../services/articleApi';
+import { createArticle } from '../../services/articleStorage';
+import { markdownToBlocks, initializeBlocks } from '../../utils/markdownToBlocks';
 import {
   getErrorMessage,
   isRetryableError,
   withRetry,
   logError,
 } from '../../utils/errorHandler';
+
+// 出力形式の定義（WordPress と Markdown のみ）
+const outputFormats = [
+  { value: 'wordpress', label: 'WordPress', description: 'Gutenbergブロック形式' },
+  { value: 'markdown', label: 'Markdown', description: '標準的なMarkdown形式' },
+] as const;
+
+type OutputFormat = typeof outputFormats[number]['value'];
 
 // 記事タイプのオプション
 const articleTypes = [
@@ -39,29 +44,34 @@ const wordCountOptions = [
   { value: 5000, label: '5000文字（詳細）' },
 ];
 
+// ステップの型定義
+type Step = 'input' | 'title-selection' | 'generating' | 'complete';
+
 /**
  * 記事生成ページコンポーネント
  */
 const GeneratePage: React.FC = () => {
   const navigate = useNavigate();
 
+  // 現在のステップ
+  const [currentStep, setCurrentStep] = useState<Step>('input');
+
   // フォーム状態
-  const [title, setTitle] = useState('');
   const [targetAudience, setTargetAudience] = useState('');
   const [purpose, setPurpose] = useState('');
   const [keywords, setKeywords] = useState('');
   const [contentPoints, setContentPoints] = useState('');
   const [wordCount, setWordCount] = useState(1500);
   const [articleType, setArticleType] = useState<'info' | 'howto' | 'review'>('info');
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>('wordpress');
   const [internalLinks, setInternalLinks] = useState<InternalLink[]>([]);
 
-  // タイトル選択状態（P2-13）
+  // タイトル選択状態
   const [titleSuggestions, setTitleSuggestions] = useState<TitleSuggestion[]>([]);
-  const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
+  const [selectedTitle, setSelectedTitle] = useState('');
   const [isGeneratingTitles, setIsGeneratingTitles] = useState(false);
 
-  // 生成状態（P2-12）
-  const [isGenerating, setIsGenerating] = useState(false);
+  // 生成状態
   const [generationProgress, setGenerationProgress] = useState(0);
   const [generationStatus, setGenerationStatus] = useState('');
 
@@ -70,7 +80,10 @@ const GeneratePage: React.FC = () => {
   const [isErrorRetryable, setIsErrorRetryable] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
-  // 内部リンク追加（P2-11）
+  // 戻る確認ダイアログ
+  const [showBackConfirm, setShowBackConfirm] = useState(false);
+
+  // 内部リンク追加
   const addInternalLink = () => {
     setInternalLinks([...internalLinks, { url: '', title: '', description: '' }]);
   };
@@ -91,10 +104,29 @@ const GeneratePage: React.FC = () => {
     setIsErrorRetryable(false);
   }, []);
 
-  // タイトル案を生成（P2-13）
+  // 戻るボタンのハンドラー
+  const handleBack = () => {
+    if (currentStep === 'title-selection') {
+      setShowBackConfirm(true);
+    }
+  };
+
+  const confirmBack = () => {
+    setShowBackConfirm(false);
+    setCurrentStep('input');
+    setTitleSuggestions([]);
+    setSelectedTitle('');
+  };
+
+  // タイトル案を生成
   const handleGenerateTitles = async () => {
     if (!contentPoints.trim()) {
       setError('本文の要点を入力してください');
+      setIsErrorRetryable(false);
+      return;
+    }
+    if (contentPoints.trim().length < 10) {
+      setError('本文の要点は10文字以上入力してください');
       setIsErrorRetryable(false);
       return;
     }
@@ -105,7 +137,6 @@ const GeneratePage: React.FC = () => {
     try {
       const response = await withRetry(
         () => articleApi.generateTitles({
-          title: title || undefined,
           targetAudience: targetAudience || undefined,
           keywords: keywords.split(/[,、\s]+/).filter(Boolean),
           contentPoints,
@@ -120,7 +151,7 @@ const GeneratePage: React.FC = () => {
       );
 
       setTitleSuggestions(response.titles);
-      setShowTitleSuggestions(true);
+      setCurrentStep('title-selection');
     } catch (err) {
       logError(err, 'handleGenerateTitles');
       setError(getErrorMessage(err));
@@ -130,36 +161,15 @@ const GeneratePage: React.FC = () => {
     }
   };
 
-  // タイトルを選択（P2-13）
-  const selectTitle = (selectedTitle: string) => {
-    setTitle(selectedTitle);
-    setShowTitleSuggestions(false);
-  };
-
-  // 記事を生成（P2-10）
-  const handleGenerate = async (isRetry = false) => {
-    // バリデーション
-    if (!title.trim()) {
-      setError('タイトルを入力してください');
-      setIsErrorRetryable(false);
-      return;
-    }
-    if (!contentPoints.trim()) {
-      setError('本文の要点を入力してください');
-      setIsErrorRetryable(false);
-      return;
-    }
-
-    if (isRetry) {
-      setRetryCount((prev) => prev + 1);
-    }
-
-    setIsGenerating(true);
+  // タイトルを選択して記事生成
+  const selectTitleAndGenerate = async (title: string) => {
+    setSelectedTitle(title);
+    setCurrentStep('generating');
     setGenerationProgress(0);
-    setGenerationStatus(isRetry ? '再試行中...' : '記事を生成中...');
+    setGenerationStatus('記事を生成中...');
     clearError();
 
-    // プログレス表示（P2-12）
+    // プログレス表示
     const progressInterval = setInterval(() => {
       setGenerationProgress((prev) => {
         if (prev >= 90) return prev;
@@ -199,37 +209,83 @@ const GeneratePage: React.FC = () => {
       clearInterval(progressInterval);
       setRetryCount(0);
 
+      // 生成された記事をlocalStorageに保存
+      initializeBlocks();
+      const blocks = markdownToBlocks(response.markdown);
+      const savedArticle = createArticle(blocks, response.title, outputFormat);
+
+      setCurrentStep('complete');
+
       // 記事編集ページへ遷移
       setTimeout(() => {
-        navigate(`/articles/${response.articleId}/edit`);
-      }, 1000);
+        navigate(`/editor?id=${savedArticle.id}`);
+      }, 1500);
     } catch (err) {
       clearInterval(progressInterval);
-      logError(err, 'handleGenerate');
+      logError(err, 'selectTitleAndGenerate');
       setError(getErrorMessage(err));
       setIsErrorRetryable(isRetryableError(err));
-      setIsGenerating(false);
+      setCurrentStep('title-selection');
     }
   };
 
   // リトライハンドラー
   const handleRetry = () => {
     if (retryCount < 3) {
-      handleGenerate(true);
+      setRetryCount((prev) => prev + 1);
+      if (selectedTitle) {
+        selectTitleAndGenerate(selectedTitle);
+      } else {
+        handleGenerateTitles();
+      }
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-4xl mx-auto py-8 px-4">
-        <h1 className="text-3xl font-bold text-gray-900 mb-8">記事を生成</h1>
+    <div className="p-8">
+      <div className="max-w-4xl mx-auto">
+        {/* ヘッダー */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">記事を生成</h1>
+          <p className="text-gray-600">
+            {currentStep === 'input' && '記事の内容を入力してください'}
+            {currentStep === 'title-selection' && 'タイトルを選択してください'}
+            {currentStep === 'generating' && '記事を生成しています...'}
+            {currentStep === 'complete' && '記事の生成が完了しました！'}
+          </p>
+        </div>
+
+        {/* ステップインジケーター */}
+        <div className="flex items-center justify-center mb-8">
+          <div className="flex items-center">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
+              currentStep === 'input' ? 'bg-blue-600 text-white' : 'bg-green-500 text-white'
+            }`}>
+              1
+            </div>
+            <div className={`w-24 h-1 ${currentStep !== 'input' ? 'bg-green-500' : 'bg-gray-300'}`} />
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
+              currentStep === 'title-selection' ? 'bg-blue-600 text-white' :
+              currentStep === 'generating' || currentStep === 'complete' ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-500'
+            }`}>
+              2
+            </div>
+            <div className={`w-24 h-1 ${currentStep === 'generating' || currentStep === 'complete' ? 'bg-green-500' : 'bg-gray-300'}`} />
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
+              currentStep === 'generating' ? 'bg-blue-600 text-white' :
+              currentStep === 'complete' ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-500'
+            }`}>
+              3
+            </div>
+          </div>
+        </div>
 
         {/* エラー表示 */}
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
             <div className="flex items-start justify-between">
               <div className="flex items-start">
-                <span className="text-red-500 mr-2">⚠️</span>
+                <span className="text-red-500 mr-2">!</span>
                 <div>
                   <p className="text-red-700">{error}</p>
                   {isErrorRetryable && retryCount < 3 && (
@@ -259,238 +315,301 @@ const GeneratePage: React.FC = () => {
           </div>
         )}
 
-        {/* 生成中のオーバーレイ（P2-12） */}
-        {isGenerating && (
+        {/* 戻る確認ダイアログ */}
+        {showBackConfirm && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
-              <h2 className="text-xl font-semibold mb-4 text-center">{generationStatus}</h2>
+            <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                入力画面に戻りますか？
+              </h3>
+              <p className="text-gray-600 mb-6">
+                タイトル候補は保持されません。入力内容は維持されます。
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowBackConfirm(false)}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={confirmBack}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  戻る
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ステップ1: 入力フォーム */}
+        {currentStep === 'input' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
+            {/* 記事タイプ */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">記事タイプ</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {articleTypes.map((type) => (
+                  <button
+                    key={type.value}
+                    onClick={() => setArticleType(type.value)}
+                    className={`p-3 border rounded-lg text-left transition-colors ${
+                      articleType === type.value
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-300 hover:border-gray-400'
+                    }`}
+                  >
+                    <p className="font-medium">{type.label}</p>
+                    <p className="text-xs text-gray-500 mt-1">{type.description}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 出力形式 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">出力形式</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {outputFormats.map((format) => (
+                  <button
+                    key={format.value}
+                    onClick={() => setOutputFormat(format.value)}
+                    className={`p-3 border rounded-lg text-left transition-colors ${
+                      outputFormat === format.value
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-300 hover:border-gray-400'
+                    }`}
+                  >
+                    <p className="font-medium">{format.label}</p>
+                    <p className="text-xs text-gray-500 mt-1">{format.description}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 対象読者 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">対象読者</label>
+              <input
+                type="text"
+                value={targetAudience}
+                onChange={(e) => setTargetAudience(e.target.value)}
+                placeholder="例: プログラミング初心者、30代の会社員"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            {/* 記事の目的 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">記事の目的</label>
+              <input
+                type="text"
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value)}
+                placeholder="例: 読者にReactの基本を理解してもらう"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            {/* キーワード */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                キーワード（カンマ区切り）
+              </label>
+              <input
+                type="text"
+                value={keywords}
+                onChange={(e) => setKeywords(e.target.value)}
+                placeholder="例: React, JavaScript, 入門, コンポーネント"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            {/* 本文の要点 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                本文の要点 <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={contentPoints}
+                onChange={(e) => setContentPoints(e.target.value)}
+                placeholder="記事に含めたい内容、ポイント、構成案などを入力してください（10文字以上）"
+                rows={6}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                {contentPoints.length} / 5000文字
+              </p>
+            </div>
+
+            {/* 文字数 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">目標文字数</label>
+              <select
+                value={wordCount}
+                onChange={(e) => setWordCount(Number(e.target.value))}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                {wordCountOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 内部リンク */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  内部リンク（任意）
+                </label>
+                <button
+                  onClick={addInternalLink}
+                  disabled={internalLinks.length >= 10}
+                  className="text-sm text-blue-600 hover:text-blue-700 disabled:text-gray-400"
+                >
+                  + リンクを追加
+                </button>
+              </div>
+              {internalLinks.length > 0 ? (
+                <div className="space-y-3">
+                  {internalLinks.map((link, index) => (
+                    <div key={index} className="p-3 border border-gray-200 rounded-lg space-y-2">
+                      <div className="flex gap-2">
+                        <input
+                          type="url"
+                          value={link.url}
+                          onChange={(e) => updateInternalLink(index, 'url', e.target.value)}
+                          placeholder="URL（例: https://example.com/article）"
+                          className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm"
+                        />
+                        <button
+                          onClick={() => removeInternalLink(index)}
+                          className="text-red-500 hover:text-red-600 px-2"
+                        >
+                          削除
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={link.title}
+                        onChange={(e) => updateInternalLink(index, 'title', e.target.value)}
+                        placeholder="リンクのタイトル"
+                        className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm"
+                      />
+                      <input
+                        type="text"
+                        value={link.description || ''}
+                        onChange={(e) => updateInternalLink(index, 'description', e.target.value)}
+                        placeholder="説明（任意）"
+                        className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  関連する記事のURLを追加すると、AIが適切な箇所にリンクを挿入します
+                </p>
+              )}
+            </div>
+
+            {/* タイトル提案ボタン */}
+            <div className="pt-4 border-t">
+              <button
+                onClick={handleGenerateTitles}
+                disabled={isGeneratingTitles || !contentPoints.trim() || contentPoints.trim().length < 10}
+                className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              >
+                {isGeneratingTitles ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    タイトルを生成中...
+                  </>
+                ) : (
+                  'タイトルを提案してもらう'
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ステップ2: タイトル選択 */}
+        {currentStep === 'title-selection' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold text-gray-900">タイトルを選択</h2>
+              <button
+                onClick={handleBack}
+                className="flex items-center gap-1 text-gray-600 hover:text-gray-800"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+                戻る
+              </button>
+            </div>
+            <div className="space-y-4">
+              {titleSuggestions.map((suggestion, index) => (
+                <button
+                  key={index}
+                  onClick={() => selectTitleAndGenerate(suggestion.title)}
+                  className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors"
+                >
+                  <p className="font-medium text-gray-900 mb-1">{suggestion.title}</p>
+                  <p className="text-sm text-gray-600">{suggestion.reason}</p>
+                </button>
+              ))}
+            </div>
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+              <p className="text-sm text-gray-600">
+                <span className="font-medium">選択した出力形式:</span>{' '}
+                {outputFormats.find(f => f.value === outputFormat)?.label}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ステップ3: 生成中 */}
+        {(currentStep === 'generating' || currentStep === 'complete') && (
+          <div className="bg-white rounded-xl border border-gray-200 p-8">
+            <div className="text-center">
+              <h2 className="text-xl font-semibold mb-4">{generationStatus}</h2>
               <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
                 <div
                   className="bg-blue-600 h-4 rounded-full transition-all duration-300"
                   style={{ width: `${generationProgress}%` }}
                 />
               </div>
-              <p className="text-center text-gray-600 text-sm">
-                AIが記事を生成しています。しばらくお待ちください...
+              {currentStep === 'generating' ? (
+                <p className="text-gray-600">
+                  AIが記事を生成しています。しばらくお待ちください...
+                </p>
+              ) : (
+                <div className="text-green-600 flex items-center justify-center gap-2">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  エディタ画面に移動します...
+                </div>
+              )}
+            </div>
+            <div className="mt-8 p-4 bg-gray-50 rounded-lg">
+              <p className="text-sm text-gray-600">
+                <span className="font-medium">タイトル:</span> {selectedTitle}
+              </p>
+              <p className="text-sm text-gray-600 mt-1">
+                <span className="font-medium">出力形式:</span>{' '}
+                {outputFormats.find(f => f.value === outputFormat)?.label}
               </p>
             </div>
           </div>
         )}
-
-        {/* タイトル選択モーダル（P2-13） */}
-        {showTitleSuggestions && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
-              <h2 className="text-xl font-semibold mb-4">タイトル案を選択</h2>
-              <div className="space-y-4">
-                {titleSuggestions.map((suggestion, index) => (
-                  <button
-                    key={index}
-                    onClick={() => selectTitle(suggestion.title)}
-                    className="w-full text-left p-4 border rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors"
-                  >
-                    <p className="font-medium text-gray-900 mb-1">{suggestion.title}</p>
-                    <p className="text-sm text-gray-600">{suggestion.reason}</p>
-                  </button>
-                ))}
-              </div>
-              <div className="mt-6 flex justify-end">
-                <button
-                  onClick={() => setShowTitleSuggestions(false)}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                >
-                  キャンセル
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 記事生成フォーム（P2-10） */}
-        <div className="bg-white rounded-lg shadow-sm p-6 space-y-6">
-          {/* タイトル */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              タイトル <span className="text-red-500">*</span>
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="記事のタイトルを入力"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <button
-                onClick={handleGenerateTitles}
-                disabled={isGeneratingTitles}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 whitespace-nowrap"
-              >
-                {isGeneratingTitles ? '生成中...' : 'AIに提案させる'}
-              </button>
-            </div>
-          </div>
-
-          {/* 記事タイプ */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">記事タイプ</label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {articleTypes.map((type) => (
-                <button
-                  key={type.value}
-                  onClick={() => setArticleType(type.value)}
-                  className={`p-3 border rounded-lg text-left transition-colors ${
-                    articleType === type.value
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-300 hover:border-gray-400'
-                  }`}
-                >
-                  <p className="font-medium">{type.label}</p>
-                  <p className="text-xs text-gray-500 mt-1">{type.description}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 対象読者 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">対象読者</label>
-            <input
-              type="text"
-              value={targetAudience}
-              onChange={(e) => setTargetAudience(e.target.value)}
-              placeholder="例: プログラミング初心者、30代の会社員"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          {/* 記事の目的 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">記事の目的</label>
-            <input
-              type="text"
-              value={purpose}
-              onChange={(e) => setPurpose(e.target.value)}
-              placeholder="例: 読者にReactの基本を理解してもらう"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          {/* キーワード */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              キーワード（カンマ区切り）
-            </label>
-            <input
-              type="text"
-              value={keywords}
-              onChange={(e) => setKeywords(e.target.value)}
-              placeholder="例: React, JavaScript, 入門, コンポーネント"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          {/* 本文の要点 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              本文の要点 <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              value={contentPoints}
-              onChange={(e) => setContentPoints(e.target.value)}
-              placeholder="記事に含めたい内容、ポイント、構成案などを入力してください"
-              rows={6}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-            <p className="text-sm text-gray-500 mt-1">
-              {contentPoints.length} / 5000文字
-            </p>
-          </div>
-
-          {/* 文字数 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">目標文字数</label>
-            <select
-              value={wordCount}
-              onChange={(e) => setWordCount(Number(e.target.value))}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              {wordCountOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* 内部リンク（P2-11） */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700">
-                内部リンク（任意）
-              </label>
-              <button
-                onClick={addInternalLink}
-                disabled={internalLinks.length >= 10}
-                className="text-sm text-blue-600 hover:text-blue-700 disabled:text-gray-400"
-              >
-                + リンクを追加
-              </button>
-            </div>
-            {internalLinks.length > 0 ? (
-              <div className="space-y-3">
-                {internalLinks.map((link, index) => (
-                  <div key={index} className="p-3 border border-gray-200 rounded-lg space-y-2">
-                    <div className="flex gap-2">
-                      <input
-                        type="url"
-                        value={link.url}
-                        onChange={(e) => updateInternalLink(index, 'url', e.target.value)}
-                        placeholder="URL（例: https://example.com/article）"
-                        className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm"
-                      />
-                      <button
-                        onClick={() => removeInternalLink(index)}
-                        className="text-red-500 hover:text-red-600 px-2"
-                      >
-                        削除
-                      </button>
-                    </div>
-                    <input
-                      type="text"
-                      value={link.title}
-                      onChange={(e) => updateInternalLink(index, 'title', e.target.value)}
-                      placeholder="リンクのタイトル"
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm"
-                    />
-                    <input
-                      type="text"
-                      value={link.description || ''}
-                      onChange={(e) => updateInternalLink(index, 'description', e.target.value)}
-                      placeholder="説明（任意）"
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm"
-                    />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">
-                関連する記事のURLを追加すると、AIが適切な箇所にリンクを挿入します
-              </p>
-            )}
-          </div>
-
-          {/* 生成ボタン */}
-          <div className="pt-4 border-t">
-            <button
-              onClick={() => handleGenerate()}
-              disabled={isGenerating || !title.trim() || !contentPoints.trim()}
-              className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-            >
-              {isGenerating ? '生成中...' : '記事を生成する'}
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
