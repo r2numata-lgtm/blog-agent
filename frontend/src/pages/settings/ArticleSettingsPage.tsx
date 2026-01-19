@@ -635,7 +635,8 @@ export const ArticleSettingsPage = () => {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
