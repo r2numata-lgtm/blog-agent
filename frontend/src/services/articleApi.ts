@@ -1,9 +1,40 @@
 /**
  * 記事生成APIサービス
  * Phase 2: P2-10〜P2-13 フロントエンド実装
+ * 非同期SQSパターン対応
  */
 
 import api from './api';
+
+/**
+ * ジョブ投入レスポンスの型
+ */
+export interface SubmitJobResponse {
+  jobId: string;
+  status: 'pending';
+  message: string;
+}
+
+/**
+ * ジョブステータスの型
+ */
+export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+/**
+ * ジョブステータスレスポンスの型
+ */
+export interface JobStatusResponse {
+  jobId: string;
+  status: JobStatus;
+  progress?: number;
+  result?: GenerateArticleResponse;
+  error?: {
+    code: string;
+    message: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
 
 /**
  * 内部リンクの型
@@ -140,10 +171,56 @@ export interface ArticleDetail {
  */
 export const articleApi = {
   /**
-   * 記事を生成
+   * 記事生成ジョブを投入（非同期）
+   * ジョブIDを返し、実際の生成はバックグラウンドで実行される
    */
-  async generate(request: GenerateArticleRequest): Promise<GenerateArticleResponse> {
-    return api.post<GenerateArticleResponse>('/articles/generate', request);
+  async submitGenerateJob(request: GenerateArticleRequest): Promise<SubmitJobResponse> {
+    return api.post<SubmitJobResponse>('/articles/generate', request);
+  },
+
+  /**
+   * ジョブステータスを取得
+   */
+  async getJobStatus(jobId: string): Promise<JobStatusResponse> {
+    return api.get<JobStatusResponse>(`/articles/jobs/${jobId}`);
+  },
+
+  /**
+   * 記事を生成（非同期ポーリング）
+   * ジョブを投入し、完了までポーリングして結果を返す
+   */
+  async generate(
+    request: GenerateArticleRequest,
+    onProgress?: (status: JobStatus, progress?: number) => void
+  ): Promise<GenerateArticleResponse> {
+    // ジョブを投入
+    const submitResponse = await this.submitGenerateJob(request);
+    const { jobId } = submitResponse;
+
+    // ポーリングで完了を待つ
+    const pollInterval = 2000; // 2秒間隔
+    const maxPolls = 180; // 最大6分 (180 * 2秒)
+
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+      const statusResponse = await this.getJobStatus(jobId);
+
+      if (onProgress) {
+        onProgress(statusResponse.status, statusResponse.progress);
+      }
+
+      if (statusResponse.status === 'completed' && statusResponse.result) {
+        return statusResponse.result;
+      }
+
+      if (statusResponse.status === 'failed') {
+        const errorMsg = statusResponse.error?.message || '記事生成に失敗しました';
+        throw new Error(errorMsg);
+      }
+    }
+
+    throw new Error('記事生成がタイムアウトしました。しばらく経ってから再度お試しください。');
   },
 
   /**

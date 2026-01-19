@@ -32,7 +32,7 @@ export class ApiError extends Error {
 const createApiClient = (): AxiosInstance => {
   const client = axios.create({
     baseURL: API_BASE_URL,
-    timeout: 30000,
+    timeout: 120000, // 記事生成に時間がかかるため2分に延長
     headers: {
       'Content-Type': 'application/json',
     },

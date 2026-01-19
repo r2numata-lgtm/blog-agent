@@ -1,6 +1,11 @@
+/**
+ * LoginPage - ログインページ
+ * P6-01〜03: UI改善版
+ */
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { Button, Input, Alert } from '../../components/ui';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -24,93 +29,137 @@ const LoginPage = () => {
       if (result.message?.includes('確認が完了していません')) {
         navigate('/confirm', { state: { email } });
       } else {
-        setError(result.message || 'ログインに失敗しました');
+        setError(getErrorMessage(result.message || ''));
       }
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h1 className="text-center text-3xl font-bold text-gray-900">
-            Blog Agent
-          </h1>
-          <h2 className="mt-6 text-center text-xl text-gray-600">
-            ログイン
-          </h2>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full">
+        {/* ロゴ・タイトル */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600 text-white mb-4 shadow-lg">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900">Blog Agent</h1>
+          <p className="mt-2 text-gray-600">AIでブログ記事を簡単作成</p>
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-              {error}
-            </div>
-          )}
+        {/* ログインカード */}
+        <div className="bg-white rounded-2xl shadow-xl p-8">
+          <h2 className="text-xl font-semibold text-gray-900 text-center mb-6">
+            ログイン
+          </h2>
 
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                メールアドレス
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="example@email.com"
-              />
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {error && (
+              <Alert type="error" onClose={() => setError('')}>
+                {error}
+              </Alert>
+            )}
+
+            <Input
+              label="メールアドレス"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="example@email.com"
+              leftIcon={
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+                </svg>
+              }
+            />
+
+            <Input
+              label="パスワード"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              leftIcon={
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              }
+            />
+
+            <div className="flex items-center justify-end">
+              <Link
+                to="/forgot-password"
+                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >
+                パスワードをお忘れですか？
+              </Link>
             </div>
 
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                パスワード
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="********"
-              />
+            <Button type="submit" isLoading={isLoading} fullWidth size="lg">
+              ログイン
+            </Button>
+          </form>
+
+          {/* 区切り線 */}
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-200" />
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-4 bg-white text-gray-500">または</span>
             </div>
           </div>
 
-          <div>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          {/* 新規登録リンク */}
+          <p className="text-center text-gray-600">
+            アカウントをお持ちでない方は{' '}
+            <Link
+              to="/register"
+              className="font-semibold text-blue-600 hover:text-blue-800"
             >
-              {isLoading ? 'ログイン中...' : 'ログイン'}
-            </button>
-          </div>
+              新規登録
+            </Link>
+          </p>
+        </div>
 
-          <div className="text-center space-y-2">
-            <p className="text-sm text-gray-600">
-              アカウントをお持ちでない方は{' '}
-              <Link to="/register" className="font-medium text-blue-600 hover:text-blue-500">
-                新規登録
-              </Link>
-            </p>
-            <p className="text-sm text-gray-600">
-              <Link to="/forgot-password" className="font-medium text-blue-600 hover:text-blue-500">
-                パスワードをお忘れの方
-              </Link>
-            </p>
-          </div>
-        </form>
+        {/* フッター */}
+        <p className="mt-6 text-center text-sm text-gray-500">
+          ログインすることで、
+          <a href="#" className="text-blue-600 hover:underline">利用規約</a>
+          と
+          <a href="#" className="text-blue-600 hover:underline">プライバシーポリシー</a>
+          に同意したものとみなされます。
+        </p>
       </div>
     </div>
   );
 };
+
+/**
+ * エラーメッセージを分かりやすく変換
+ */
+function getErrorMessage(message: string): string {
+  if (message.includes('Incorrect username or password')) {
+    return 'メールアドレスまたはパスワードが正しくありません。';
+  }
+  if (message.includes('User does not exist')) {
+    return 'このメールアドレスは登録されていません。';
+  }
+  if (message.includes('Password attempts exceeded')) {
+    return 'ログイン試行回数が上限に達しました。しばらくしてからお試しください。';
+  }
+  if (message.includes('User is not confirmed')) {
+    return 'メールアドレスの確認が完了していません。';
+  }
+  if (message.includes('Network')) {
+    return 'ネットワークエラーが発生しました。接続を確認してください。';
+  }
+  return message || 'ログインに失敗しました。もう一度お試しください。';
+}
 
 export default LoginPage;

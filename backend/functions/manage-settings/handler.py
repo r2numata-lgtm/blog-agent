@@ -15,6 +15,81 @@ from botocore.exceptions import ClientError
 USERS_TABLE = os.environ.get("USERS_TABLE", "blog-agent-users")
 REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
 
+# デフォルト設定（decorationService.ts / settingsStore.ts と同期）
+DEFAULT_SETTINGS = {
+    "articleStyle": {
+        "taste": "friendly",
+        "firstPerson": "watashi",
+        "readerAddress": "minasan",
+        "tone": "explanatory",
+        "introStyle": "problem"
+    },
+    "decorations": [
+        {
+            "id": "ba-highlight",
+            "label": "ハイライト",
+            "roles": ["attention"],
+            "css": ".ba-highlight { background: linear-gradient(transparent 60%, #fff59d 60%); padding: 0 4px; font-weight: 600; }",
+            "enabled": True
+        },
+        {
+            "id": "ba-point",
+            "label": "ポイント",
+            "roles": ["attention", "explain"],
+            "css": ".ba-point { background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-point::before { content: \"💡 ポイント\"; display: block; font-weight: 700; color: #1976d2; margin-bottom: 8px; font-size: 14px; }",
+            "enabled": True
+        },
+        {
+            "id": "ba-warning",
+            "label": "警告",
+            "roles": ["warning"],
+            "css": ".ba-warning { background-color: #fff3e0; border-left: 4px solid #ff9800; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-warning::before { content: \"⚠️ 注意\"; display: block; font-weight: 700; color: #e65100; margin-bottom: 8px; font-size: 14px; }",
+            "enabled": True
+        },
+        {
+            "id": "ba-success",
+            "label": "成功",
+            "roles": ["action"],
+            "css": ".ba-success { background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-success::before { content: \"✅ 成功\"; display: block; font-weight: 700; color: #2e7d32; margin-bottom: 8px; font-size: 14px; }",
+            "enabled": True
+        },
+        {
+            "id": "ba-quote",
+            "label": "引用",
+            "roles": ["explain"],
+            "css": ".ba-quote { background-color: #f5f5f5; border-left: 4px solid #9e9e9e; padding: 16px 20px; margin: 24px 0; font-style: italic; color: #616161; border-radius: 0 8px 8px 0; } .ba-quote::before { content: \"📝\"; margin-right: 8px; }",
+            "enabled": True
+        },
+        {
+            "id": "ba-summary",
+            "label": "まとめ",
+            "roles": ["summarize"],
+            "css": ".ba-summary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 24px; margin: 24px 0; border-radius: 12px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.25); } .ba-summary::before { content: \"📋 まとめ\"; display: block; font-weight: 700; margin-bottom: 12px; font-size: 16px; }",
+            "enabled": True
+        },
+        {
+            "id": "ba-checklist",
+            "label": "チェックリスト",
+            "roles": ["summarize", "action"],
+            "css": ".ba-checklist { background-color: #fafafa; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; } .ba-checklist ul { list-style: none; padding: 0; margin: 0; } .ba-checklist li { padding: 8px 0; padding-left: 28px; position: relative; } .ba-checklist li::before { content: \"☑️\"; position: absolute; left: 0; }",
+            "enabled": True
+        },
+        {
+            "id": "ba-number-list",
+            "label": "番号付きリスト",
+            "roles": ["explain", "action"],
+            "css": ".ba-number-list { background-color: #fff; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; counter-reset: number-list; } .ba-number-list ol { list-style: none; padding: 0; margin: 0; } .ba-number-list li { padding: 12px 0; padding-left: 40px; position: relative; border-bottom: 1px dashed #e0e0e0; counter-increment: number-list; } .ba-number-list li:last-child { border-bottom: none; } .ba-number-list li::before { content: counter(number-list); position: absolute; left: 0; width: 28px; height: 28px; background: #2196f3; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }",
+            "enabled": True
+        }
+    ],
+    "baseClass": "ba-article",
+    "seo": {
+        "metaDescriptionLength": 140,
+        "maxKeywords": 7
+    },
+    "sampleArticles": []
+}
+
 # DynamoDBクライアント
 dynamodb = boto3.resource("dynamodb", region_name=REGION)
 users_table = dynamodb.Table(USERS_TABLE)
@@ -42,25 +117,22 @@ def get_user_id_from_context(event: dict) -> str | None:
 
 
 def get_settings(user_id: str) -> dict:
-    """ユーザー設定を取得"""
+    """ユーザー設定を取得（未設定項目はデフォルト値を返す）"""
     try:
         response = users_table.get_item(Key={"userId": user_id})
         item = response.get("Item")
 
         if not item:
-            # ユーザーが存在しない場合は新規作成
-            return {
-                "articleStyle": None,
-                "decorations": None,
-                "seo": None,
-                "sampleArticles": [],
-            }
+            # ユーザーが存在しない場合はデフォルト設定を返す
+            return DEFAULT_SETTINGS.copy()
 
+        # 各項目について、設定がなければデフォルト値を使用
         return {
-            "articleStyle": item.get("articleStyle"),
-            "decorations": item.get("decorations"),
-            "seo": item.get("seo"),
-            "sampleArticles": item.get("sampleArticles", []),
+            "articleStyle": item.get("articleStyle") or DEFAULT_SETTINGS["articleStyle"],
+            "decorations": item.get("decorations") or DEFAULT_SETTINGS["decorations"],
+            "seo": item.get("seo") or DEFAULT_SETTINGS["seo"],
+            "baseClass": item.get("baseClass") or DEFAULT_SETTINGS["baseClass"],
+            "sampleArticles": item.get("sampleArticles") if item.get("sampleArticles") is not None else DEFAULT_SETTINGS["sampleArticles"],
         }
     except ClientError as e:
         raise Exception(f"DynamoDB error: {e.response['Error']['Message']}")
@@ -100,6 +172,12 @@ def save_settings(user_id: str, settings: dict) -> dict:
             expression_values[":sampleArticles"] = settings["sampleArticles"]
             expression_names["#sampleArticles"] = "sampleArticles"
 
+        # baseClass
+        if "baseClass" in settings:
+            update_parts.append("#baseClass = :baseClass")
+            expression_values[":baseClass"] = settings["baseClass"]
+            expression_names["#baseClass"] = "baseClass"
+
         update_parts.append("updatedAt = :updatedAt")
 
         update_expression = "SET " + ", ".join(update_parts)
@@ -114,10 +192,11 @@ def save_settings(user_id: str, settings: dict) -> dict:
 
         updated_item = response.get("Attributes", {})
         return {
-            "articleStyle": updated_item.get("articleStyle"),
-            "decorations": updated_item.get("decorations"),
-            "seo": updated_item.get("seo"),
-            "sampleArticles": updated_item.get("sampleArticles", []),
+            "articleStyle": updated_item.get("articleStyle") or DEFAULT_SETTINGS["articleStyle"],
+            "decorations": updated_item.get("decorations") or DEFAULT_SETTINGS["decorations"],
+            "seo": updated_item.get("seo") or DEFAULT_SETTINGS["seo"],
+            "baseClass": updated_item.get("baseClass") or DEFAULT_SETTINGS["baseClass"],
+            "sampleArticles": updated_item.get("sampleArticles") if updated_item.get("sampleArticles") is not None else DEFAULT_SETTINGS["sampleArticles"],
             "updatedAt": updated_item.get("updatedAt"),
         }
     except ClientError as e:

@@ -1,6 +1,6 @@
 /**
  * EditorPage - 記事エディタページ
- * WordPress: ブロックエディタ / コードエディタ / プレビュー（3タブ、相互同期）
+ * WordPress: コードエディタ / プレビュー（2タブ）
  * Markdown: Markdownエディタ / プレビュー（2タブ）
  * チャット修正機能付き
  */
@@ -22,21 +22,7 @@ import {
 } from '../../services/articleStorage';
 import { getAllDecorationCSS } from '../../services/decorationService';
 
-// WordPress スタイルのインポート
-import '@wordpress/components/build-style/style.css';
-import '@wordpress/block-editor/build-style/style.css';
-import '@wordpress/block-library/build-style/style.css';
-import '@wordpress/block-library/build-style/editor.css';
 
-import {
-  BlockEditorProvider,
-  BlockList,
-  BlockTools,
-  WritingFlow,
-  ObserveTyping,
-  BlockInspector,
-} from '@wordpress/block-editor';
-import { Popover, SlotFillProvider } from '@wordpress/components';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BlockInstance = any;
@@ -52,7 +38,7 @@ function initializeBlocks(): void {
 }
 
 // タブの型定義
-type WordPressTab = 'code' | 'block' | 'preview';
+type WordPressTab = 'code' | 'preview';
 type MarkdownTab = 'edit' | 'preview';
 
 // 出力形式のラベル
@@ -80,11 +66,10 @@ const EditorPage: React.FC = () => {
   const [markdownContent, setMarkdownContent] = useState('');
 
   // UI状態
-  const [wpTab, setWpTab] = useState<WordPressTab>('block');
+  const [wpTab, setWpTab] = useState<WordPressTab>('code');
   const [mdTab, setMdTab] = useState<MarkdownTab>('edit');
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
-  const [showInspector, setShowInspector] = useState(true);
   const [decorationCSS, setDecorationCSS] = useState('');
 
   // チャット状態
@@ -94,11 +79,6 @@ const EditorPage: React.FC = () => {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // 履歴管理（WordPress用）
-  const [history, setHistory] = useState<BlockInstance[][]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const historyRef = useRef({ history, historyIndex });
-  historyRef.current = { history, historyIndex };
 
   // 装飾CSSを読み込み
   useEffect(() => {
@@ -117,8 +97,6 @@ const EditorPage: React.FC = () => {
           const loadedBlocks = getArticleBlocks(id);
           if (loadedBlocks) {
             setBlocks(loadedBlocks);
-            setHistory([loadedBlocks]);
-            setHistoryIndex(0);
             setHtmlContent(serialize(loadedBlocks));
           }
         } else if (loadedArticle.outputFormat === 'markdown') {
@@ -156,71 +134,15 @@ const EditorPage: React.FC = () => {
     }
   }, [searchParams, navigate]);
 
-  // WordPress: HTMLからブロックを同期
-  const syncHtmlToBlocks = useCallback((html: string) => {
-    try {
-      const newBlocks = parse(html);
-      if (newBlocks && newBlocks.length > 0) {
-        setBlocks(newBlocks);
-      }
-    } catch (e) {
-      console.error('Failed to parse HTML:', e);
-    }
-  }, []);
-
-  // WordPress: ブロックからHTMLを同期
-  const syncBlocksToHtml = useCallback((newBlocks: BlockInstance[]) => {
-    const html = serialize(newBlocks);
-    setHtmlContent(html);
-  }, []);
-
-  // ブロック変更ハンドラ
-  const handleBlocksChange = useCallback((newBlocks: BlockInstance[]) => {
-    setBlocks(newBlocks);
-    syncBlocksToHtml(newBlocks);
-
-    // 履歴に追加
-    const { history: currentHistory, historyIndex: currentIndex } = historyRef.current;
-    const newHistory = currentHistory.slice(0, currentIndex + 1);
-    newHistory.push(newBlocks);
-    if (newHistory.length > 50) newHistory.shift();
-    setHistory(newHistory);
-    setHistoryIndex(newHistory.length - 1);
-  }, [syncBlocksToHtml]);
-
   // HTMLコード変更ハンドラ
   const handleHtmlChange = useCallback((html: string) => {
     setHtmlContent(html);
   }, []);
 
-  // コードエディタからブロックエディタに切り替え時に同期
+  // タブ切り替え
   const handleWpTabChange = useCallback((newTab: WordPressTab) => {
-    if (wpTab === 'code' && newTab === 'block') {
-      // コード→ブロック: HTMLをパースしてブロックに変換
-      syncHtmlToBlocks(htmlContent);
-    }
     setWpTab(newTab);
-  }, [wpTab, htmlContent, syncHtmlToBlocks]);
-
-  // 元に戻す
-  const handleUndo = useCallback(() => {
-    if (historyIndex > 0) {
-      const newIndex = historyIndex - 1;
-      setHistoryIndex(newIndex);
-      setBlocks(history[newIndex]);
-      syncBlocksToHtml(history[newIndex]);
-    }
-  }, [history, historyIndex, syncBlocksToHtml]);
-
-  // やり直す
-  const handleRedo = useCallback(() => {
-    if (historyIndex < history.length - 1) {
-      const newIndex = historyIndex + 1;
-      setHistoryIndex(newIndex);
-      setBlocks(history[newIndex]);
-      syncBlocksToHtml(history[newIndex]);
-    }
-  }, [history, historyIndex, syncBlocksToHtml]);
+  }, []);
 
   // 保存処理
   const handleSave = useCallback(async () => {
@@ -261,16 +183,6 @@ const EditorPage: React.FC = () => {
   // キーボードショートカット
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
-        e.preventDefault();
-        if (article?.outputFormat === 'wordpress') {
-          if (e.shiftKey) {
-            handleRedo();
-          } else {
-            handleUndo();
-          }
-        }
-      }
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault();
         handleSave();
@@ -278,7 +190,7 @@ const EditorPage: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, handleSave, article]);
+  }, [handleSave]);
 
   // コードをコピー
   const handleCopyCode = useCallback(() => {
@@ -331,22 +243,14 @@ const EditorPage: React.FC = () => {
 
   // Markdownプレビュー生成
   const markdownPreviewHtml = useCallback(() => {
+    // markedオプションを設定
+    marked.setOptions({
+      gfm: true, // GitHub Flavored Markdown
+      breaks: true, // 改行を<br>に変換
+    });
     const rawHtml = marked(markdownContent) as string;
     return DOMPurify.sanitize(rawHtml);
   }, [markdownContent]);
-
-  // エディタ設定
-  const settings = {
-    hasFixedToolbar: true,
-    focusMode: false,
-    hasUploadPermissions: false,
-    codeEditingEnabled: true,
-    canLockBlocks: false,
-    enableOpenverseMediaCategory: false,
-    generateAnchors: true,
-    __experimentalCanUserUseUnfilteredHTML: true,
-    isDistractionFree: false,
-  };
 
   if (!article) {
     return (
@@ -429,16 +333,6 @@ const EditorPage: React.FC = () => {
       {isWordPress && (
         <div className="flex border-b bg-white">
           <button
-            onClick={() => handleWpTabChange('block')}
-            className={`px-6 py-3 text-sm font-medium border-b-2 -mb-px ${
-              wpTab === 'block'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            ブロックエディタ
-          </button>
-          <button
             onClick={() => handleWpTabChange('code')}
             className={`px-6 py-3 text-sm font-medium border-b-2 -mb-px ${
               wpTab === 'code'
@@ -491,60 +385,6 @@ const EditorPage: React.FC = () => {
       <div className="flex-1 flex overflow-hidden">
         {/* エディタエリア */}
         <div className={`flex-1 overflow-hidden ${showChat ? 'border-r' : ''}`}>
-          {/* WordPress: ブロックエディタ */}
-          {isWordPress && wpTab === 'block' && (
-            <div className="h-full flex">
-              <SlotFillProvider>
-                <BlockEditorProvider
-                  value={blocks}
-                  onInput={handleBlocksChange}
-                  onChange={handleBlocksChange}
-                  settings={settings}
-                >
-                  <div className="flex-1 p-6 overflow-y-auto bg-white ba-editor-area">
-                    <BlockTools>
-                      <WritingFlow>
-                        <ObserveTyping>
-                          <BlockList />
-                        </ObserveTyping>
-                      </WritingFlow>
-                    </BlockTools>
-                  </div>
-
-                  {showInspector && (
-                    <div className="w-72 border-l bg-gray-50 overflow-y-auto">
-                      <div className="p-3 border-b bg-white flex items-center justify-between">
-                        <h3 className="font-semibold text-sm">ブロック設定</h3>
-                        <button
-                          onClick={() => setShowInspector(false)}
-                          className="text-gray-400 hover:text-gray-600"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                      <div className="p-4">
-                        <BlockInspector />
-                      </div>
-                    </div>
-                  )}
-
-                  {!showInspector && (
-                    <button
-                      onClick={() => setShowInspector(true)}
-                      className="absolute right-4 top-4 px-3 py-1.5 text-sm bg-white border rounded shadow hover:bg-gray-50"
-                    >
-                      設定
-                    </button>
-                  )}
-
-                  <Popover.Slot />
-                </BlockEditorProvider>
-              </SlotFillProvider>
-            </div>
-          )}
-
           {/* WordPress: コードエディタ */}
           {isWordPress && wpTab === 'code' && (
             <div className="h-full">
@@ -562,7 +402,7 @@ const EditorPage: React.FC = () => {
           {isWordPress && wpTab === 'preview' && (
             <div className="h-full overflow-y-auto p-8 bg-gray-100">
               <div className="max-w-3xl mx-auto bg-white p-8 rounded-lg shadow">
-                <article className="ba-article prose prose-lg max-w-none">
+                <article className="ba-article">
                   <h1 className="text-3xl font-bold mb-6">{article.title}</h1>
                   <div dangerouslySetInnerHTML={{ __html: serialize(blocks) }} />
                 </article>
@@ -583,7 +423,7 @@ const EditorPage: React.FC = () => {
           {isMarkdown && mdTab === 'preview' && (
             <div className="h-full overflow-y-auto p-8 bg-gray-100">
               <div className="max-w-3xl mx-auto bg-white p-8 rounded-lg shadow">
-                <article className="prose prose-lg max-w-none">
+                <article className="ba-article">
                   <h1 className="text-3xl font-bold mb-6">{article.title}</h1>
                   <div dangerouslySetInnerHTML={{ __html: markdownPreviewHtml() }} />
                 </article>

@@ -1,0 +1,734 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Blog Agent Infrastructure - Multi-Environment Support
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Deployment environment
+
+  ClaudeApiKey:
+    Type: String
+    NoEcho: true
+    Description: Claude API Key for article generation
+
+Resources:
+  # ===========================================
+  # Cognito User Pool
+  # ===========================================
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'blog-agent-users-${Environment}'
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      UserPoolTags:
+        Environment: !Ref Environment
+        Project: blog-agent
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub 'blog-agent-client-${Environment}'
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      PreventUserExistenceErrors: ENABLED
+      SupportedIdentityProviders:
+        - COGNITO
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+
+  # ===========================================
+  # S3 Bucket for Frontend Hosting
+  # ===========================================
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'blog-agent-frontend-${Environment}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+
+  # ===========================================
+  # CloudFront Distribution
+  # ===========================================
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'blog-agent-oac-${Environment}'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+          Compress: true
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+        PriceClass: PriceClass_100
+        HttpVersion: http2and3
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  # ===========================================
+  # DynamoDB Tables
+  # ===========================================
+  ArticlesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'blog-agent-articles-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: articleId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+        - AttributeName: articleId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: CreatedAtIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  SettingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'blog-agent-settings-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  ConversationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'blog-agent-conversations-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: conversationId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: conversationId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  # ===========================================
+  # Jobs Table (非同期ジョブ管理)
+  # ===========================================
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'blog-agent-jobs-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jobId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jobId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  # ===========================================
+  # SQS Queue (記事生成キュー)
+  # ===========================================
+  ArticleGenerationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'blog-agent-article-generation-${Environment}'
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 86400
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  # ===========================================
+  # Lambda Execution Role
+  # ===========================================
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'blog-agent-lambda-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt ArticlesTable.Arn
+                  - !Sub '${ArticlesTable.Arn}/index/*'
+                  - !GetAtt SettingsTable.Arn
+                  - !GetAtt ConversationsTable.Arn
+                  - !GetAtt JobsTable.Arn
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !GetAtt ArticleGenerationQueue.Arn
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  # ===========================================
+  # Lambda Functions
+  # ===========================================
+  GenerateArticleFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'blog-agent-generate-article-${Environment}'
+      Runtime: python3.11
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          CLAUDE_API_KEY: !Ref ClaudeApiKey
+          DYNAMODB_TABLE_ARTICLES: !Ref ArticlesTable
+          DYNAMODB_TABLE_SETTINGS: !Ref SettingsTable
+          DYNAMODB_TABLE_JOBS: !Ref JobsTable
+          SQS_QUEUE_URL: !Ref ArticleGenerationQueue
+          CLAUDE_MODEL: claude-sonnet-4-20250514
+          LOCAL_DEV: 'false'
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': 'Placeholder - deploy actual code'}
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  # SQS Event Source Mapping for Article Generation
+  GenerateArticleSQSTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt ArticleGenerationQueue.Arn
+      FunctionName: !Ref GenerateArticleFunction
+      BatchSize: 1
+      Enabled: true
+
+  ChatEditFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'blog-agent-chat-edit-${Environment}'
+      Runtime: python3.11
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          CLAUDE_API_KEY: !Ref ClaudeApiKey
+          DYNAMODB_TABLE_CONVERSATIONS: !Ref ConversationsTable
+          CLAUDE_MODEL: claude-sonnet-4-20250514
+          LOCAL_DEV: 'false'
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': 'Placeholder - deploy actual code'}
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  ManageSettingsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'blog-agent-manage-settings-${Environment}'
+      Runtime: python3.11
+      Handler: app.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_SETTINGS: !Ref SettingsTable
+          LOCAL_DEV: 'false'
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': 'Placeholder - deploy actual code'}
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  AuthorizerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'blog-agent-authorizer-${Environment}'
+      Runtime: python3.11
+      Handler: handler.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_REGION: !Ref AWS::Region
+          COGNITO_APP_CLIENT_ID: !Ref UserPoolClient
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': 'Placeholder - deploy actual code'}
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  # ===========================================
+  # API Gateway
+  # ===========================================
+  ApiGateway:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub 'blog-agent-api-${Environment}'
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Amz-Date
+          - X-Api-Key
+        MaxAge: 300
+      Tags:
+        Environment: !Ref Environment
+        Project: blog-agent
+
+  ApiGatewayStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref ApiGateway
+      StageName: !Ref Environment
+      AutoDeploy: true
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiGatewayLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength"}'
+
+  ApiGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/blog-agent-${Environment}'
+      RetentionInDays: 30
+
+  # Lambda Authorizer
+  LambdaAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref ApiGateway
+      AuthorizerType: REQUEST
+      AuthorizerUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerFunction.Arn}/invocations'
+      AuthorizerPayloadFormatVersion: '2.0'
+      AuthorizerResultTtlInSeconds: 300
+      EnableSimpleResponses: true
+      IdentitySource:
+        - '$request.header.Authorization'
+      Name: !Sub 'blog-agent-authorizer-${Environment}'
+
+  AuthorizerFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AuthorizerFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  # ===========================================
+  # API Gateway Integrations
+  # ===========================================
+  GenerateArticleIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GenerateArticleFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  ChatEditIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ChatEditFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  ManageSettingsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ManageSettingsFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  # ===========================================
+  # API Gateway Routes
+  # ===========================================
+  # Generate Article Routes
+  GenerateArticleRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /articles/generate'
+      Target: !Sub 'integrations/${GenerateArticleIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  GenerateTitlesRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /articles/generate/titles'
+      Target: !Sub 'integrations/${GenerateArticleIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  GenerateMetaRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /articles/generate/meta'
+      Target: !Sub 'integrations/${GenerateArticleIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  # Job Status Route
+  JobStatusRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /articles/jobs/{jobId}'
+      Target: !Sub 'integrations/${GenerateArticleIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  # Chat Edit Route
+  ChatEditRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /chat/edit'
+      Target: !Sub 'integrations/${ChatEditIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  # Settings Routes
+  GetSettingsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /settings'
+      Target: !Sub 'integrations/${ManageSettingsIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  UpdateSettingsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'PUT /settings'
+      Target: !Sub 'integrations/${ManageSettingsIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  # Health Check (No Auth)
+  HealthCheckRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /health'
+      Target: !Sub 'integrations/${ManageSettingsIntegration}'
+      AuthorizationType: NONE
+
+  # ===========================================
+  # Lambda Permissions for API Gateway
+  # ===========================================
+  GenerateArticleFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GenerateArticleFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  ChatEditFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ChatEditFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  ManageSettingsFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ManageSettingsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+Outputs:
+  # Cognito
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolId'
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref UserPoolClient
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolClientId'
+
+  # CloudFront
+  CloudFrontDistributionDomainName:
+    Description: CloudFront Distribution Domain Name
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontDomain'
+
+  CloudFrontDistributionId:
+    Description: CloudFront Distribution ID
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontId'
+
+  # S3
+  FrontendBucketName:
+    Description: Frontend S3 Bucket Name
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-FrontendBucket'
+
+  # API Gateway
+  ApiGatewayEndpoint:
+    Description: API Gateway Endpoint
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiEndpoint'
+
+  # DynamoDB
+  ArticlesTableName:
+    Description: Articles DynamoDB Table Name
+    Value: !Ref ArticlesTable
+    Export:
+      Name: !Sub '${AWS::StackName}-ArticlesTable'
+
+  SettingsTableName:
+    Description: Settings DynamoDB Table Name
+    Value: !Ref SettingsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-SettingsTable'
+
+  ConversationsTableName:
+    Description: Conversations DynamoDB Table Name
+    Value: !Ref ConversationsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-ConversationsTable'
+
+  # Lambda
+  LambdaExecutionRoleArn:
+    Description: Lambda Execution Role ARN
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaRoleArn'
+
+  GenerateArticleFunctionArn:
+    Description: Generate Article Lambda Function ARN
+    Value: !GetAtt GenerateArticleFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GenerateArticleFunctionArn'
+
+  ChatEditFunctionArn:
+    Description: Chat Edit Lambda Function ARN
+    Value: !GetAtt ChatEditFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ChatEditFunctionArn'
+
+  ManageSettingsFunctionArn:
+    Description: Manage Settings Lambda Function ARN
+    Value: !GetAtt ManageSettingsFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ManageSettingsFunctionArn'

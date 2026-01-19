@@ -10,6 +10,7 @@ import {
   type GenerateArticleRequest,
   type TitleSuggestion,
   type InternalLink,
+  type JobStatus,
 } from '../../services/articleApi';
 import { createArticle } from '../../services/articleStorage';
 import { markdownToBlocks, initializeBlocks } from '../../utils/markdownToBlocks';
@@ -161,26 +162,31 @@ const GeneratePage: React.FC = () => {
     }
   };
 
+  // ジョブステータスに応じたメッセージを返す
+  const getStatusMessage = (status: JobStatus): string => {
+    switch (status) {
+      case 'pending':
+        return 'ジョブを準備中...';
+      case 'processing':
+        return 'AIが記事を執筆中...';
+      case 'completed':
+        return '生成完了！';
+      case 'failed':
+        return '生成に失敗しました';
+      default:
+        return '処理中...';
+    }
+  };
+
   // タイトルを選択して記事生成
   const selectTitleAndGenerate = async (title: string) => {
     setSelectedTitle(title);
     setCurrentStep('generating');
     setGenerationProgress(0);
-    setGenerationStatus('記事を生成中...');
+    setGenerationStatus('ジョブを投入中...');
     clearError();
 
-    // プログレス表示
-    const progressInterval = setInterval(() => {
-      setGenerationProgress((prev) => {
-        if (prev >= 90) return prev;
-        return prev + Math.random() * 10;
-      });
-    }, 500);
-
     try {
-      setGenerationStatus('AIが記事を執筆中...');
-      setGenerationProgress(30);
-
       const request: GenerateArticleRequest = {
         title,
         targetAudience: targetAudience || undefined,
@@ -192,21 +198,26 @@ const GeneratePage: React.FC = () => {
         internalLinks: internalLinks.filter((link) => link.url && link.title),
       };
 
-      const response = await withRetry(
-        () => articleApi.generate(request),
-        {
-          maxRetries: 2,
-          delayMs: 2000,
-          onRetry: (attempt) => {
-            setGenerationStatus(`リトライ中 (${attempt}/2)...`);
-          },
+      // 非同期ポーリングで記事生成（進捗コールバック付き）
+      const response = await articleApi.generate(request, (status, progress) => {
+        setGenerationStatus(getStatusMessage(status));
+        if (progress !== undefined) {
+          setGenerationProgress(progress);
+        } else {
+          // progressが未定義の場合、ステータスに応じた概算を設定
+          switch (status) {
+            case 'pending':
+              setGenerationProgress(10);
+              break;
+            case 'processing':
+              setGenerationProgress((prev) => Math.min(prev + 5, 85));
+              break;
+          }
         }
-      );
+      });
 
       setGenerationStatus('生成完了！');
       setGenerationProgress(100);
-
-      clearInterval(progressInterval);
       setRetryCount(0);
 
       // 生成された記事をlocalStorageに保存
@@ -221,7 +232,6 @@ const GeneratePage: React.FC = () => {
         navigate(`/editor?id=${savedArticle.id}`);
       }, 1500);
     } catch (err) {
-      clearInterval(progressInterval);
       logError(err, 'selectTitleAndGenerate');
       setError(getErrorMessage(err));
       setIsErrorRetryable(isRetryableError(err));

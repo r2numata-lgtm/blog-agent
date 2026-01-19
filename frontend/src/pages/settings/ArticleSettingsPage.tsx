@@ -7,7 +7,9 @@ import {
   readerAddressLabels,
   toneLabels,
   introStyleLabels,
+  SEMANTIC_ROLES,
   type ArticleStyleSettings,
+  type SemanticRole,
 } from '../../stores/settingsStore';
 import {
   getDecorationSettings,
@@ -16,8 +18,10 @@ import {
   addCustomDecoration,
   deleteCustomDecoration,
   isStandardDecoration,
+  getDecorationWithRoles,
   type Decoration,
 } from '../../services/decorationService';
+import type { DecorationWithRoles } from '../../stores/settingsStore';
 
 export const ArticleSettingsPage = () => {
   const navigate = useNavigate();
@@ -35,17 +39,20 @@ export const ArticleSettingsPage = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [decorations, setDecorations] = useState<Decoration[]>([]);
+  const [decorationsWithRoles, setDecorationsWithRoles] = useState<DecorationWithRoles[]>([]);
   const [showCopied, setShowCopied] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newDecorationId, setNewDecorationId] = useState('');
   const [newDecorationName, setNewDecorationName] = useState('');
   const [newDecorationCSS, setNewDecorationCSS] = useState('');
+  const [newDecorationRoles, setNewDecorationRoles] = useState<SemanticRole[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 装飾設定を読み込み
   useEffect(() => {
     const settings = getDecorationSettings();
     setDecorations(settings.decorations);
+    setDecorationsWithRoles(getDecorationWithRoles());
   }, []);
 
   const showSuccess = (message: string) => {
@@ -138,22 +145,39 @@ export const ArticleSettingsPage = () => {
 
   // オリジナル装飾を追加
   const handleAddDecoration = () => {
+    // role選択チェック
+    if (newDecorationRoles.length === 0) {
+      showError('少なくとも1つの役割を選択してください');
+      return;
+    }
+
     try {
       const idWithPrefix = newDecorationId.startsWith('ba-') ? newDecorationId : `ba-${newDecorationId}`;
       const css = newDecorationCSS || `.${idWithPrefix} {\n  /* スタイルを記述 */\n}`;
 
-      const added = addCustomDecoration(idWithPrefix, newDecorationName, css);
+      const added = addCustomDecoration(idWithPrefix, newDecorationName, css, newDecorationRoles);
       if (added) {
         setDecorations(prev => [...prev, added]);
+        setDecorationsWithRoles(getDecorationWithRoles());
         setShowAddModal(false);
         setNewDecorationId('');
         setNewDecorationName('');
         setNewDecorationCSS('');
+        setNewDecorationRoles([]);
         showSuccess('オリジナル装飾を追加しました');
       }
     } catch (e) {
       showError(e instanceof Error ? e.message : '装飾の追加に失敗しました');
     }
+  };
+
+  // role選択のトグル
+  const handleToggleRole = (role: SemanticRole) => {
+    setNewDecorationRoles(prev =>
+      prev.includes(role)
+        ? prev.filter(r => r !== role)
+        : prev.length < 3 ? [...prev, role] : prev
+    );
   };
 
   // オリジナル装飾を削除
@@ -512,7 +536,12 @@ export const ArticleSettingsPage = () => {
             </div>
 
             <div className="space-y-2">
-              {decorations.map((decoration) => (
+              {decorations.map((decoration) => {
+                // rolesを取得
+                const decorationWithRoles = decorationsWithRoles.find(d => d.id === decoration.id);
+                const roles = decorationWithRoles?.roles || [];
+
+                return (
                 <div
                   key={decoration.id}
                   className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition"
@@ -540,9 +569,29 @@ export const ArticleSettingsPage = () => {
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      クラス名: <code className="bg-gray-200 px-1 rounded">.{decoration.id}</code>
-                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-xs text-gray-500">
+                        クラス名: <code className="bg-gray-200 px-1 rounded">.{decoration.id}</code>
+                      </p>
+                      {roles.length > 0 && (
+                        <div className="flex gap-1">
+                          {roles.map(role => (
+                            <span
+                              key={role}
+                              className="px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded"
+                              title={SEMANTIC_ROLES[role]?.description}
+                            >
+                              {SEMANTIC_ROLES[role]?.label || role}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {roles.length === 0 && (
+                        <span className="text-xs text-red-500">
+                          ※役割未設定（記事生成で使用されません）
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <button
@@ -642,12 +691,52 @@ export const ArticleSettingsPage = () => {
                     value={newDecorationCSS}
                     onChange={(e) => setNewDecorationCSS(e.target.value)}
                     placeholder={`.ba-${newDecorationId || 'custom-box'} {\n  background-color: #f0f0f0;\n  padding: 16px;\n  border-radius: 8px;\n}`}
-                    rows={8}
+                    rows={6}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     空欄の場合はテンプレートが作成されます
                   </p>
+                </div>
+
+                {/* 役割（role）選択 - 必須 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    この装飾の役割 <span className="text-red-500">*</span>
+                  </label>
+                  <p className="text-xs text-gray-500 mb-3">
+                    AIが使い分ける基準になります（1〜3個選択）
+                  </p>
+                  <div className="space-y-2">
+                    {(Object.entries(SEMANTIC_ROLES) as [SemanticRole, { label: string; description: string }][]).map(
+                      ([role, { label, description }]) => (
+                        <label
+                          key={role}
+                          className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition ${
+                            newDecorationRoles.includes(role)
+                              ? 'bg-blue-50 border-blue-300'
+                              : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={newDecorationRoles.includes(role)}
+                            onChange={() => handleToggleRole(role)}
+                            className="mt-0.5 h-4 w-4 text-blue-600 rounded border-gray-300"
+                          />
+                          <div>
+                            <span className="font-medium text-gray-900">{label}</span>
+                            <p className="text-xs text-gray-500">{description}</p>
+                          </div>
+                        </label>
+                      )
+                    )}
+                  </div>
+                  {newDecorationRoles.length === 0 && (
+                    <p className="text-xs text-red-500 mt-2">
+                      ※ 少なくとも1つの役割を選択してください
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -658,6 +747,7 @@ export const ArticleSettingsPage = () => {
                     setNewDecorationId('');
                     setNewDecorationName('');
                     setNewDecorationCSS('');
+                    setNewDecorationRoles([]);
                   }}
                   className="px-4 py-2 text-gray-600 hover:text-gray-800"
                 >
@@ -665,7 +755,7 @@ export const ArticleSettingsPage = () => {
                 </button>
                 <button
                   onClick={handleAddDecoration}
-                  disabled={!newDecorationName.trim() || !newDecorationId.trim()}
+                  disabled={!newDecorationName.trim() || !newDecorationId.trim() || newDecorationRoles.length === 0}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
                 >
                   追加

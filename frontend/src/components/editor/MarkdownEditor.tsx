@@ -3,9 +3,7 @@
  * シンタックスハイライト機能付き
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import { useRef, useCallback } from 'react';
 
 interface MarkdownEditorProps {
   value: string;
@@ -13,24 +11,6 @@ interface MarkdownEditorProps {
   className?: string;
 }
 
-// シンタックスハイライト用のトークン定義
-interface Token {
-  type: string;
-  regex: RegExp;
-  className: string;
-}
-
-const TOKENS: Token[] = [
-  { type: 'heading', regex: /^(#{1,6})\s+(.*)$/gm, className: 'text-blue-600 font-bold' },
-  { type: 'bold', regex: /\*\*([^*]+)\*\*/g, className: 'text-orange-600 font-bold' },
-  { type: 'italic', regex: /\*([^*]+)\*/g, className: 'text-purple-600 italic' },
-  { type: 'link', regex: /\[([^\]]+)\]\(([^)]+)\)/g, className: 'text-green-600 underline' },
-  { type: 'code', regex: /`([^`]+)`/g, className: 'bg-gray-200 text-red-600 px-1 rounded' },
-  { type: 'blockquote', regex: /^>\s+(.*)$/gm, className: 'text-gray-500 border-l-4 border-gray-300 pl-2' },
-  { type: 'list', regex: /^[-*]\s+(.*)$/gm, className: 'text-cyan-600' },
-  { type: 'orderedList', regex: /^\d+\.\s+(.*)$/gm, className: 'text-cyan-600' },
-  { type: 'emoji', regex: /([\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}])/gu, className: '' },
-];
 
 /**
  * MarkdownEditor コンポーネント
@@ -38,12 +18,10 @@ const TOKENS: Token[] = [
 const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange, className = '' }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
 
   // スクロール同期
   const handleScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
     const target = e.target as HTMLTextAreaElement;
-    setScrollTop(target.scrollTop);
     if (highlightRef.current) {
       highlightRef.current.scrollTop = target.scrollTop;
     }
@@ -134,7 +112,6 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ value, onChange, classN
       <div
         ref={highlightRef}
         className="absolute inset-0 p-4 font-mono text-sm bg-gray-900 text-gray-100 overflow-hidden whitespace-pre-wrap break-words pointer-events-none"
-        style={{ scrollTop }}
         dangerouslySetInnerHTML={{ __html: highlightedContent(value) + '\n' }}
       />
 

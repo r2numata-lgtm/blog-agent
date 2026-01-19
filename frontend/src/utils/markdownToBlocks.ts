@@ -32,10 +32,18 @@ export function initializeBlocks(): void {
 
 /**
  * カスタム装飾タグのパターン
+ *
+ * 旧形式:
  * :::box type="info"
  * 内容
  * :::
  *
+ * 新形式 (decoration ID直接指定):
+ * :::box id="ba-point"
+ * 内容
+ * :::
+ *
+ * 吹き出し:
  * :::balloon position="left" icon="😊"
  * 内容
  * :::
@@ -47,6 +55,33 @@ interface CustomTag {
   raw: string;
 }
 
+// 旧type → 新decorationIdのマッピング
+const LEGACY_TYPE_TO_DECORATION_ID: Record<string, string> = {
+  info: 'ba-point',
+  warning: 'ba-warning',
+  success: 'ba-success',
+  error: 'ba-warning',
+};
+
+// 新decorationId → 旧typeのマッピング（後方互換性用）
+const DECORATION_ID_TO_LEGACY_TYPE: Record<string, string> = {
+  'ba-point': 'info',
+  'ba-warning': 'warning',
+  'ba-success': 'success',
+  'ba-highlight': 'info',
+  'ba-quote': 'info',
+  'ba-summary': 'info',
+  'ba-checklist': 'info',
+  'ba-number-list': 'info',
+};
+
+/**
+ * decorationIdから旧typeを推定（後方互換性用）
+ */
+function decorationIdToLegacyType(decorationId: string): string {
+  return DECORATION_ID_TO_LEGACY_TYPE[decorationId] || 'info';
+}
+
 /**
  * カスタム装飾タグを抽出
  */
@@ -55,13 +90,28 @@ function extractCustomTags(markdown: string): { cleanMarkdown: string; tags: Map
   let cleanMarkdown = markdown;
   let placeholderIndex = 0;
 
-  // ボックス装飾を抽出
-  const boxPattern = /:::box\s+type="(info|warning|success|error)"[\s\S]*?\n([\s\S]*?):::/g;
-  cleanMarkdown = cleanMarkdown.replace(boxPattern, (match, type, content) => {
+  // 新形式: :::box id="ba-xxx" を抽出
+  const boxIdPattern = /:::box\s+id="([^"]+)"[\s\S]*?\n([\s\S]*?):::/g;
+  cleanMarkdown = cleanMarkdown.replace(boxIdPattern, (match, decorationId, content) => {
     const placeholder = `__CUSTOM_TAG_${placeholderIndex++}__`;
     tags.set(placeholder, {
       type: 'box',
-      attributes: { type },
+      attributes: { decorationId },
+      content: content.trim(),
+      raw: match,
+    });
+    return placeholder;
+  });
+
+  // 旧形式: :::box type="info" を抽出（後方互換性）
+  const boxTypePattern = /:::box\s+type="(info|warning|success|error)"[\s\S]*?\n([\s\S]*?):::/g;
+  cleanMarkdown = cleanMarkdown.replace(boxTypePattern, (match, type, content) => {
+    const placeholder = `__CUSTOM_TAG_${placeholderIndex++}__`;
+    // 旧typeを新decorationIdに変換
+    const decorationId = LEGACY_TYPE_TO_DECORATION_ID[type] || 'ba-point';
+    tags.set(placeholder, {
+      type: 'box',
+      attributes: { decorationId, legacyType: type },
       content: content.trim(),
       raw: match,
     });
@@ -123,8 +173,13 @@ function convertElementToBlock(element: Element, customTags: Map<string, CustomT
     const tag = customTags.get(textContent.trim());
     if (tag) {
       if (tag.type === 'box') {
+        // 新形式: decorationIdを直接使用
+        const decorationId = tag.attributes.decorationId;
+        // 旧形式との互換性のためtypeも設定（decorationIdから推定）
+        const legacyType = tag.attributes.legacyType || decorationIdToLegacyType(decorationId);
         return createBlock('blog-agent/box', {
-          type: tag.attributes.type as BoxType,
+          type: legacyType as BoxType,
+          decorationId: decorationId,
           content: tag.content,
         });
       }
@@ -154,8 +209,12 @@ function convertElementToBlock(element: Element, customTags: Map<string, CustomT
       const tag = customTags.get(customTagMatch[0]);
       if (tag) {
         if (tag.type === 'box') {
+          // 新形式: decorationIdを直接使用
+          const decorationId = tag.attributes.decorationId;
+          const legacyType = tag.attributes.legacyType || decorationIdToLegacyType(decorationId);
           return createBlock('blog-agent/box', {
-            type: tag.attributes.type as BoxType,
+            type: legacyType as BoxType,
+            decorationId: decorationId,
             content: tag.content,
           });
         }
@@ -409,6 +468,11 @@ function blockToMarkdown(block: BlockInstance): string {
       return '---';
 
     case 'blog-agent/box':
+      // 新形式: decorationIdがある場合はそれを使用
+      if (attributes.decorationId) {
+        return `:::box id="${attributes.decorationId}"\n${attributes.content}\n:::`;
+      }
+      // 旧形式: typeを使用（後方互換性）
       return `:::box type="${attributes.type}"\n${attributes.content}\n:::`;
 
     case 'blog-agent/balloon':

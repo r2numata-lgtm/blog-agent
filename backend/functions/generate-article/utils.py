@@ -6,7 +6,16 @@ import json
 import logging
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Dict, Optional
+
+
+class DecimalEncoder(json.JSONEncoder):
+    """Decimal型をJSON シリアライズ可能にするエンコーダー"""
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
 
 # ロガー設定
 logger = logging.getLogger()
@@ -23,14 +32,14 @@ def generate_article_id() -> str:
     return f"art_{uuid.uuid4().hex[:16]}"
 
 
-def get_current_timestamp() -> int:
+def get_current_timestamp() -> str:
     """
-    現在のUNIXタイムスタンプを取得
+    現在のISO形式タイムスタンプを取得
 
     Returns:
-        UNIXタイムスタンプ（秒）
+        ISO形式タイムスタンプ文字列
     """
-    return int(datetime.now().timestamp())
+    return datetime.now().isoformat()
 
 
 def log_info(message: str, **kwargs) -> None:
@@ -131,7 +140,7 @@ def create_response(
     return {
         'statusCode': status_code,
         'headers': headers,
-        'body': json.dumps(body, ensure_ascii=False)
+        'body': json.dumps(body, ensure_ascii=False, cls=DecimalEncoder)
     }
 
 
@@ -169,6 +178,13 @@ def get_user_id(event: Dict[str, Any]) -> Optional[str]:
     """
     request_context = event.get('requestContext', {})
     authorizer = request_context.get('authorizer', {})
+
+    # HTTP API v2 (Simple Response) 形式: authorizer.lambda.userId
+    lambda_context = authorizer.get('lambda', {})
+    if lambda_context.get('userId'):
+        return lambda_context.get('userId')
+
+    # REST API v1 形式
     return authorizer.get('principalId') or authorizer.get('claims', {}).get('sub')
 
 

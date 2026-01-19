@@ -25,6 +25,25 @@ class DecorationSettings(TypedDict, total=False):
     table: bool
 
 
+# 新しい装飾スキーマ（roles対応）
+class DecorationWithRoles(TypedDict):
+    id: str
+    label: str
+    roles: List[str]  # 'attention', 'warning', 'summarize', 'explain', 'action'
+    css: str
+    enabled: bool
+
+
+# 意味的ロールの定義
+SEMANTIC_ROLES = {
+    'attention': '重要なポイントや強調したい内容',
+    'warning': '注意点や警告、気をつけるべきこと',
+    'summarize': 'まとめや要点の整理',
+    'explain': '詳しい説明や補足情報',
+    'action': '次のステップや行動を促す内容'
+}
+
+
 class SeoSettings(TypedDict, total=False):
     metaDescriptionLength: int
     maxKeywords: int
@@ -512,3 +531,239 @@ def build_meta_generation_prompt(markdown_content: str, seo: Optional[SeoSetting
 - keywords: 記事内で重要なキーワードを抽出
 - suggestedSlug: URLに使える英数字とハイフンのみ
 - estimatedReadingTime: 平均的な読者が読み終わる時間（1分あたり400文字で計算）"""
+
+
+# ============================================================
+# 2段階生成システム（Phase 2）
+# Step 1: 構造生成（roleのみ、CSSなし）
+# Step 2: 出力生成（decorationIdのみ、CSSなし）
+# ============================================================
+
+def get_available_roles(decorations: List[DecorationWithRoles]) -> List[str]:
+    """有効な装飾からrolesを抽出"""
+    roles = set()
+    for dec in decorations:
+        if dec.get('enabled', True) and dec.get('roles'):
+            roles.update(dec['roles'])
+    return list(roles)
+
+
+def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] = None) -> str:
+    """
+    Step 1: 記事構造をJSON形式で生成（roleのみ、CSSなし）
+    Claudeは意味的なroleのみを判断し、具体的な装飾IDは決めない
+    """
+    settings = settings or {}
+
+    # 基本情報
+    title = body.get('title', '')
+    target_audience = body.get('targetAudience', '一般')
+    purpose = body.get('purpose', '情報提供')
+    keywords = body.get('keywords', [])
+    content_points = body.get('contentPoints', '')
+    word_count = body.get('wordCount', 1500)
+    article_type = body.get('articleType', 'info')
+
+    # 設定から取得
+    article_style = settings.get('articleStyle', {})
+    decorations = settings.get('decorations', [])
+    sample_articles = settings.get('sampleArticles', [])
+
+    # 利用可能なrolesを取得
+    available_roles = get_available_roles(decorations) if isinstance(decorations, list) else []
+
+    # 文体指示
+    style_instructions = build_style_instructions(article_style)
+
+    # サンプル記事コンテキスト
+    sample_context = build_sample_article_context(sample_articles)
+
+    # 記事タイプ指示
+    article_type_instructions = build_article_type_instructions(article_type)
+
+    # 利用可能なroles説明
+    roles_explanation = ""
+    if available_roles:
+        role_descriptions = []
+        for role in available_roles:
+            if role in SEMANTIC_ROLES:
+                role_descriptions.append(f'- "{role}": {SEMANTIC_ROLES[role]}')
+        roles_explanation = f"""## 使用可能な意味的ロール
+以下のroleを適切な箇所で使用してください。roleは段落やブロックの「意味・目的」を表します。
+
+{chr(10).join(role_descriptions)}
+
+### ロール使用のガイドライン
+- 同じroleを連続して使わない
+- 1記事内で同じroleは最大3回まで
+- roleが不要な通常の段落はrolesを空配列[]にする
+- 装飾に頼りすぎず、本文の流れを重視する"""
+
+    prompt = f"""あなたはブログ記事生成の専門家です。以下の情報をもとに、記事の構造をJSON形式で生成してください。
+
+## 記事情報
+- タイトル: {title}
+- 対象読者: {target_audience}
+- 記事の目的: {purpose}
+- キーワード: {', '.join(keywords) if keywords else 'なし'}
+- 目標文字数: {word_count}文字程度
+
+## 内容要件
+{content_points}
+
+## 文体・スタイル
+{style_instructions}
+
+{article_type_instructions}
+
+{roles_explanation}
+
+{sample_context}
+
+## 出力形式（JSON）
+以下の形式で記事構造を出力してください。**必ずJSONのみを出力し、他の説明は不要です。**
+
+```json
+{{
+  "title": "記事タイトル",
+  "sections": [
+    {{
+      "heading": "H2見出し",
+      "blocks": [
+        {{
+          "type": "paragraph",
+          "content": "段落の内容",
+          "roles": []
+        }},
+        {{
+          "type": "paragraph",
+          "content": "重要なポイントの内容",
+          "roles": ["attention"]
+        }},
+        {{
+          "type": "list",
+          "listType": "unordered",
+          "items": ["項目1", "項目2", "項目3"],
+          "roles": []
+        }},
+        {{
+          "type": "subsection",
+          "heading": "H3見出し",
+          "blocks": [
+            {{
+              "type": "paragraph",
+              "content": "小見出し内の内容",
+              "roles": []
+            }}
+          ]
+        }}
+      ]
+    }}
+  ],
+  "meta": {{
+    "metaDescription": "メタディスクリプション（140文字以内）"
+  }}
+}}
+```
+
+## ブロックタイプ
+- "paragraph": 通常の段落
+- "list": リスト（listType: "unordered" または "ordered"）
+- "subsection": H3小見出しセクション（blocks配列を含む）
+
+## 制約条件
+- sections数（H2見出し）: 3〜6個
+- 各sectionにblocks: 2〜5個
+- roles付きブロック: 記事全体で2〜5箇所
+- 同じroleの連続使用禁止
+- 同じroleは記事内で最大3回
+
+**重要: JSONのみを出力してください。説明文や前置きは不要です。**"""
+
+    return prompt
+
+
+def build_output_prompt(
+    mapped_structure: dict,
+    decorations: List[DecorationWithRoles],
+    output_format: str = 'markdown'
+) -> str:
+    """
+    Step 2: マッピング済み構造からMarkdown/HTML出力を生成
+    decorationIdは既にマッピング済み、CSSは含まない
+    """
+
+    # 装飾ID -> ラベルのマッピング作成（出力時の参照用）
+    decoration_map = {d['id']: d['label'] for d in decorations if d.get('enabled', True)}
+
+    decoration_instructions = ""
+    if decoration_map:
+        dec_list = [f'- {did}: {label}' for did, label in decoration_map.items()]
+        decoration_instructions = f"""## 使用する装飾
+以下の装飾IDが構造データに含まれています。指定された形式で出力してください。
+
+{chr(10).join(dec_list)}
+
+### 装飾の出力形式（Markdown）
+```
+:::box id="{list(decoration_map.keys())[0] if decoration_map else 'ba-point'}"
+ここに内容を記載
+:::
+```"""
+
+    import json
+    structure_json = json.dumps(mapped_structure, ensure_ascii=False, indent=2)
+
+    prompt = f"""以下の記事構造データをMarkdown形式に変換してください。
+
+## 記事構造データ
+```json
+{structure_json}
+```
+
+{decoration_instructions}
+
+## 出力形式
+- Markdown形式で出力
+- 見出しはh2(##)から開始（h1は使わない）
+- decorationIdが指定されているブロックは `:::box id="装飾ID"` 形式で囲む
+- decorationIdがないブロックは通常のMarkdownで出力
+- 段落間は1行空ける
+
+## 出力例
+```markdown
+## 見出し
+
+通常の段落テキストです。
+
+:::box id="ba-point"
+重要なポイントの内容です。
+:::
+
+- リスト項目1
+- リスト項目2
+
+### 小見出し
+
+小見出し内の内容です。
+```
+
+**重要: Markdownのみを出力してください。説明文や前置きは不要です。**"""
+
+    return prompt
+
+
+def build_prompt_two_step(body: ArticleInput, settings: Optional[UserSettings] = None) -> dict:
+    """
+    2段階生成用のプロンプトセットを返す
+
+    Returns:
+        dict: {
+            'structure_prompt': Step1用プロンプト,
+            'settings': 設定データ（Step2で使用）
+        }
+    """
+    return {
+        'structure_prompt': build_structure_prompt(body, settings),
+        'settings': settings or {}
+    }

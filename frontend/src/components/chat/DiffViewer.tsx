@@ -122,7 +122,6 @@ interface SideBySideDiffProps {
 export function SideBySideDiff({ originalContent, newContent }: SideBySideDiffProps) {
   const originalLines = originalContent.split('\n');
   const newLines = newContent.split('\n');
-  const maxLines = Math.max(originalLines.length, newLines.length);
 
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">

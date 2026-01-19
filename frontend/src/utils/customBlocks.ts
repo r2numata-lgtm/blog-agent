@@ -21,6 +21,7 @@ interface BlockSaveProps<T> {
 // ボックスブロックの属性
 interface BoxAttributes {
   type: BoxType;
+  decorationId?: string; // 新形式: 装飾ID (例: 'ba-point', 'ba-warning')
   content: string;
 }
 
@@ -95,6 +96,10 @@ export function registerCustomBlocks(): void {
         type: 'string',
         default: 'info',
       },
+      decorationId: {
+        type: 'string',
+        default: '',
+      },
       content: {
         type: 'string',
         default: '',
@@ -145,38 +150,51 @@ export function registerCustomBlocks(): void {
       );
     },
     save: ({ attributes }: BlockSaveProps<BoxAttributes>) => {
-      const { type, content } = attributes;
+      const { type, decorationId, content } = attributes;
       const style = boxStyles[type] || boxStyles.info;
 
-      return createElement(
-        'div',
-        {
-          className: `blog-agent-box blog-agent-box-${type}`,
-          style: {
+      // 新形式: decorationIdがある場合はそれをクラス名として使用
+      // 旧形式: blog-agent-box-${type} を使用（後方互換性）
+      // 注: ba-article は記事全体のラッパーに使用するため、装飾ブロックには含めない
+      const className = decorationId || `blog-agent-box blog-agent-box-${type}`;
+
+      // 新形式の場合はインラインスタイルを使わない（CSSで定義）
+      const inlineStyle = decorationId
+        ? undefined
+        : {
             backgroundColor: style.bgColor,
             borderLeft: `4px solid ${style.borderColor}`,
             padding: '16px',
             margin: '16px 0',
             borderRadius: '4px',
-          },
+          };
+
+      return createElement(
+        'div',
+        {
+          className: className,
+          style: inlineStyle,
         },
-        createElement(
-          'div',
-          {
-            className: 'blog-agent-box-header',
-            style: {
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              marginBottom: '8px',
-              fontWeight: 'bold',
-            },
-          },
-          style.icon,
-          style.label
-        ),
+        // 新形式の場合はヘッダーを表示しない（CSSの::beforeで表示）
+        decorationId
+          ? null
+          : createElement(
+              'div',
+              {
+                className: 'blog-agent-box-header',
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginBottom: '8px',
+                  fontWeight: 'bold',
+                },
+              },
+              style.icon,
+              style.label
+            ),
         createElement('div', {
-          className: 'blog-agent-box-content',
+          className: decorationId ? undefined : 'blog-agent-box-content',
           dangerouslySetInnerHTML: { __html: content },
         })
       );

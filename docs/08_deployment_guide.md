@@ -1,7 +1,7 @@
 # デプロイガイド
 
-**ドキュメントバージョン**: 1.0  
-**最終更新日**: 2024-12-03  
+**ドキュメントバージョン**: 2.0
+**最終更新日**: 2026-01-10
 **関連ドキュメント**: 02_architecture.md
 
 ---
@@ -11,8 +11,14 @@
 このドキュメントでは、ブログ生成エージェントのデプロイ手順を説明します。
 
 ### デプロイ環境
-- **開発環境（dev）**: 機能開発・テスト用
-- **本番環境（prod）**: 実ユーザー向け
+- **ステージング環境（staging）**: テスト用
+- **本番環境（production）**: 実ユーザー向け
+
+### デプロイ方式
+- **インフラ**: CloudFormation（IaC）
+- **CI/CD**: GitHub Actions
+- **モニタリング**: CloudWatch
+- **バックアップ**: AWS Backup
 
 ---
 
@@ -27,10 +33,7 @@ aws --version  # 2.0以上
 node --version  # 20.x
 
 # Python
-python --version  # 3.11
-
-# AWS SAM CLI
-sam --version  # 1.100以上
+python --version  # 3.12
 ```
 
 ### AWS認証情報設定
@@ -42,43 +45,116 @@ aws configure
 # Default output format: json
 ```
 
+### GitHub Secrets設定
+以下のシークレットをGitHubリポジトリに設定：
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+
+### GitHub Variables設定
+以下の変数をGitHubリポジトリに設定：
+- `VITE_API_URL`
+- `VITE_COGNITO_USER_POOL_ID`
+- `VITE_COGNITO_CLIENT_ID`
+
 ---
 
-## 🏗️ 初回セットアップ
+## 🏗️ インフラストラクチャ
 
-### 1. リポジトリクローン
+### CloudFormationスタック構成
+
+#### メインスタック（infra/cloudformation.yaml）
+- S3バケット（フロントエンドホスティング）
+- CloudFrontディストリビューション
+- API Gateway HTTP API
+- DynamoDBテーブル（Articles, Settings, Conversations）
+- Lambda実行ロール
+- CloudWatch Logs
+
+#### モニタリングスタック（infra/monitoring.yaml）
+- CloudWatchアラーム
+- CloudWatchダッシュボード
+- SNS通知トピック
+- AWS Backupボールト・プラン
+
+### 手動デプロイ手順
+
+**1. メインスタックのデプロイ**
 ```bash
-git clone https://github.com/yourusername/blog-agent.git
-cd blog-agent
+aws cloudformation deploy \
+  --template-file infra/cloudformation.yaml \
+  --stack-name blog-agent-production \
+  --parameter-overrides Environment=production \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --no-fail-on-empty-changeset
 ```
 
-### 2. 環境変数設定
-
-**フロントエンド（.env.production）**
+**2. モニタリングスタックのデプロイ**
 ```bash
-VITE_API_BASE_URL=https://api.blog-agent.com
-VITE_COGNITO_USER_POOL_ID=ap-northeast-1_XXXXX
-VITE_COGNITO_CLIENT_ID=XXXXX
+aws cloudformation deploy \
+  --template-file infra/monitoring.yaml \
+  --stack-name blog-agent-monitoring-production \
+  --parameter-overrides \
+    Environment=production \
+    AlertEmail=your-email@example.com \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --no-fail-on-empty-changeset
 ```
 
-**バックエンド（samconfig.toml）**
-```toml
-version = 0.1
-[default.deploy.parameters]
-stack_name = "blog-agent-prod"
-region = "ap-northeast-1"
-capabilities = "CAPABILITY_IAM"
-parameter_overrides = [
-  "Environment=prod",
-  "ClaudeAPIKey=XXXXX"
-]
+**3. スタック出力の確認**
+```bash
+aws cloudformation describe-stacks \
+  --stack-name blog-agent-production \
+  --query 'Stacks[0].Outputs'
 ```
+
+---
+
+## 🔄 CI/CDパイプライン
+
+### GitHub Actions ワークフロー
+
+#### CI（継続的インテグレーション）
+ファイル: `.github/workflows/ci.yml`
+
+トリガー:
+- mainブランチへのpush
+- developブランチへのpush
+- main/developへのPull Request
+
+実行内容:
+1. **lint-and-test**: Lint、ユニットテスト、ビルド
+2. **e2e-test**: Playwright E2Eテスト
+3. **backend-test**: Python バックエンドテスト
+
+#### Deploy（継続的デプロイメント）
+ファイル: `.github/workflows/deploy.yml`
+
+トリガー:
+- mainブランチへのpush
+- 手動実行（workflow_dispatch）
+
+実行内容:
+1. **deploy-infrastructure**: CloudFormationスタックデプロイ
+2. **build-and-deploy-frontend**: フロントエンドビルド・S3デプロイ
+3. **deploy-backend**: Lambda関数デプロイ
+4. **notify-deployment**: デプロイサマリー出力
+
+### 手動でのデプロイ実行
+
+GitHubリポジトリの「Actions」タブから:
+1. 「Deploy」ワークフローを選択
+2. 「Run workflow」をクリック
+3. 環境（production/staging）を選択
+4. 「Run workflow」を実行
 
 ---
 
 ## 🎨 フロントエンドデプロイ
 
-### 手順
+### 自動デプロイ（推奨）
+mainブランチへのpushで自動デプロイされます。
+
+### 手動デプロイ
 
 **1. ビルド**
 ```bash
@@ -89,304 +165,131 @@ npm run build
 
 **2. S3にアップロード**
 ```bash
-aws s3 sync dist/ s3://blog-agent-frontend-prod \
+# バケット名を取得
+BUCKET_NAME=$(aws cloudformation describe-stacks \
+  --stack-name blog-agent-production \
+  --query 'Stacks[0].Outputs[?OutputKey==`FrontendBucketName`].OutputValue' \
+  --output text)
+
+# アセットファイル（長期キャッシュ）
+aws s3 sync dist/ s3://$BUCKET_NAME/ \
   --delete \
-  --cache-control "public, max-age=31536000"
+  --cache-control "public, max-age=31536000, immutable" \
+  --exclude "index.html" \
+  --exclude "*.json"
+
+# index.html（キャッシュなし）
+aws s3 cp dist/index.html s3://$BUCKET_NAME/ \
+  --cache-control "public, max-age=0, must-revalidate"
 ```
 
 **3. CloudFrontキャッシュクリア**
 ```bash
-aws cloudfront create-invalidation \
-  --distribution-id E1234567890ABC \
-  --paths "/*"
-```
+DIST_ID=$(aws cloudformation describe-stacks \
+  --stack-name blog-agent-production \
+  --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
+  --output text)
 
-### 自動化スクリプト
-
-**deploy-frontend.sh**
-```bash
-#!/bin/bash
-
-set -e
-
-ENV=${1:-prod}
-echo "Deploying frontend to $ENV..."
-
-# ビルド
-cd frontend
-npm run build
-
-# S3アップロード
-if [ "$ENV" = "prod" ]; then
-  BUCKET="blog-agent-frontend-prod"
-  DIST_ID="E1234567890ABC"
-else
-  BUCKET="blog-agent-frontend-dev"
-  DIST_ID="E0987654321XYZ"
-fi
-
-aws s3 sync dist/ s3://$BUCKET --delete
-
-# キャッシュクリア
 aws cloudfront create-invalidation \
   --distribution-id $DIST_ID \
   --paths "/*"
-
-echo "Frontend deployed successfully!"
-```
-
-**使用方法**
-```bash
-chmod +x scripts/deploy-frontend.sh
-./scripts/deploy-frontend.sh prod
 ```
 
 ---
 
 ## ⚙️ バックエンドデプロイ
 
-### SAMを使用したデプロイ
+### Lambda関数のデプロイ
 
-**1. ビルド**
+**1. 依存関係のインストール**
 ```bash
 cd backend
-sam build
+pip install -r requirements.txt -t lambda_package/
 ```
 
-**2. デプロイ（初回）**
+**2. ソースコードのコピー**
 ```bash
-sam deploy --guided
+cp -r lambda/* lambda_package/
 ```
 
-対話形式で以下を入力：
-- Stack Name: blog-agent-prod
-- AWS Region: ap-northeast-1
-- Parameter Environment: prod
-- Confirm changes before deploy: Y
-- Allow SAM CLI IAM role creation: Y
-- Save arguments to configuration file: Y
-
-**3. デプロイ（2回目以降）**
+**3. デプロイパッケージの作成**
 ```bash
-sam deploy
+cd lambda_package
+zip -r ../deployment.zip .
+cd ..
 ```
 
-### Lambda関数の個別更新
-
-特定のLambda関数のみ更新する場合：
-
+**4. Lambda関数の更新**
 ```bash
-# 記事生成Lambda のみ更新
-cd backend/functions/generate-article
-zip -r function.zip .
-aws lambda update-function-code \
-  --function-name blog-agent-generate-article-prod \
-  --zip-file fileb://function.zip
+for func in generate-article chat-edit manage-settings; do
+  aws lambda update-function-code \
+    --function-name blog-agent-$func-production \
+    --zip-file fileb://deployment.zip \
+    --publish
+done
 ```
 
 ---
 
-## 🗄️ データベースセットアップ
+## 📊 モニタリング
 
-### DynamoDBテーブル作成
+### CloudWatchアラーム
 
-**AWS CLIで作成**
-```bash
-# ユーザーテーブル
-aws dynamodb create-table \
-  --table-name blog-agent-users-prod \
-  --attribute-definitions \
-    AttributeName=userId,AttributeType=S \
-  --key-schema \
-    AttributeName=userId,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST \
-  --point-in-time-recovery-specification Enabled=true
+| アラーム | 閾値 | 説明 |
+|---------|------|------|
+| API Gateway 5xx | > 10/5分 | サーバーエラー検知 |
+| API Gateway Latency | > 5000ms | レイテンシー異常 |
+| Lambda Errors | > 5/5分 | Lambda実行エラー |
+| Lambda Throttles | > 1/5分 | スロットリング検知 |
+| DynamoDB Read Throttle | > 1/5分 | 読み取りスロットリング |
+| DynamoDB Write Throttle | > 1/5分 | 書き込みスロットリング |
 
-# 記事テーブル
-aws dynamodb create-table \
-  --table-name blog-agent-articles-prod \
-  --attribute-definitions \
-    AttributeName=userId,AttributeType=S \
-    AttributeName=articleId,AttributeType=S \
-    AttributeName=createdAt,AttributeType=N \
-  --key-schema \
-    AttributeName=userId,KeyType=HASH \
-    AttributeName=articleId,KeyType=RANGE \
-  --global-secondary-indexes \
-    'IndexName=CreatedAtIndex,KeySchema=[{AttributeName=userId,KeyType=HASH},{AttributeName=createdAt,KeyType=RANGE}],Projection={ProjectionType=ALL}' \
-  --billing-mode PAY_PER_REQUEST \
-  --point-in-time-recovery-specification Enabled=true
+### CloudWatchダッシュボード
+
+ダッシュボードURL:
+```
+https://ap-northeast-1.console.aws.amazon.com/cloudwatch/home?region=ap-northeast-1#dashboards:name=blog-agent-production
 ```
 
-### 初期データ投入
+表示メトリクス:
+- API Gatewayリクエスト数・エラー率
+- API Gatewayレイテンシー（平均・p99）
+- Lambda実行数・エラー数・スロットル
+- Lambdaデュレーション（平均・p99）
+- DynamoDB消費キャパシティ
+- CloudFrontリクエスト数・エラー率
 
-```bash
-cd backend/scripts
-python seed_data.py --env prod
-```
+### アラート通知
+
+SNS経由でメール通知:
+1. monitoring.yamlの`AlertEmail`パラメータにメールアドレスを設定
+2. スタックデプロイ後、確認メールが届くので承認
 
 ---
 
-## 🔐 Cognitoセットアップ
+## 💾 バックアップ
 
-### User Pool作成
+### AWS Backupの設定
 
-**AWS CLIで作成**
+| プラン | スケジュール | 保持期間 |
+|--------|-------------|---------|
+| 日次バックアップ | 毎日 12:00 JST | 30日間 |
+| 週次バックアップ | 毎週日曜 12:00 JST | 90日間 |
+
+### バックアップ対象
+- DynamoDBテーブル（blog-agent-*-production）
+
+### リストア手順
 ```bash
-aws cognito-idp create-user-pool \
-  --pool-name blog-agent-users-prod \
-  --policies '{
-    "PasswordPolicy": {
-      "MinimumLength": 8,
-      "RequireUppercase": true,
-      "RequireLowercase": true,
-      "RequireNumbers": true,
-      "RequireSymbols": false
-    }
-  }' \
-  --auto-verified-attributes email \
-  --email-configuration EmailSendingAccount=COGNITO_DEFAULT
-```
+# バックアップ一覧
+aws backup list-recovery-points-by-backup-vault \
+  --backup-vault-name blog-agent-vault-production
 
-### User Pool Client作成
-
-```bash
-aws cognito-idp create-user-pool-client \
-  --user-pool-id ap-northeast-1_XXXXX \
-  --client-name blog-agent-web-prod \
-  --explicit-auth-flows \
-    ALLOW_USER_PASSWORD_AUTH \
-    ALLOW_REFRESH_TOKEN_AUTH \
-  --token-validity-units '{
-    "AccessToken": "hours",
-    "IdToken": "hours",
-    "RefreshToken": "days"
-  }' \
-  --access-token-validity 1 \
-  --id-token-validity 1 \
-  --refresh-token-validity 30
-```
-
----
-
-## 📊 モニタリング設定
-
-### CloudWatch Alarms
-
-**Lambda エラーアラーム**
-```bash
-aws cloudwatch put-metric-alarm \
-  --alarm-name blog-agent-lambda-errors-prod \
-  --alarm-description "Lambda error rate > 5%" \
-  --metric-name Errors \
-  --namespace AWS/Lambda \
-  --dimensions Name=FunctionName,Value=blog-agent-generate-article-prod \
-  --statistic Sum \
-  --period 300 \
-  --evaluation-periods 1 \
-  --threshold 5 \
-  --comparison-operator GreaterThanThreshold \
-  --alarm-actions arn:aws:sns:ap-northeast-1:123456789012:blog-agent-alerts
-```
-
-**API Gateway エラーアラーム**
-```bash
-aws cloudwatch put-metric-alarm \
-  --alarm-name blog-agent-api-5xx-prod \
-  --alarm-description "API 5XX error rate > 1%" \
-  --metric-name 5XXError \
-  --namespace AWS/ApiGateway \
-  --dimensions Name=ApiName,Value=blog-agent-api-prod \
-  --statistic Average \
-  --period 300 \
-  --evaluation-periods 1 \
-  --threshold 0.01 \
-  --comparison-operator GreaterThanThreshold \
-  --alarm-actions arn:aws:sns:ap-northeast-1:123456789012:blog-agent-alerts
-```
-
----
-
-## 🔄 CI/CDパイプライン
-
-### GitHub Actions設定
-
-**.github/workflows/deploy.yml**
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  deploy-frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-      
-      - name: Install dependencies
-        run: |
-          cd frontend
-          npm ci
-      
-      - name: Build
-        run: |
-          cd frontend
-          npm run build
-      
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-northeast-1
-      
-      - name: Deploy to S3
-        run: |
-          aws s3 sync frontend/dist/ s3://blog-agent-frontend-prod --delete
-      
-      - name: Invalidate CloudFront
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID }} \
-            --paths "/*"
-
-  deploy-backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      
-      - name: Setup SAM
-        uses: aws-actions/setup-sam@v2
-      
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-northeast-1
-      
-      - name: SAM Build
-        run: |
-          cd backend
-          sam build
-      
-      - name: SAM Deploy
-        run: |
-          cd backend
-          sam deploy --no-confirm-changeset --no-fail-on-empty-changeset
+# リストアジョブの開始
+aws backup start-restore-job \
+  --recovery-point-arn arn:aws:backup:... \
+  --metadata TargetTableName=blog-agent-articles-restored \
+  --iam-role-arn arn:aws:iam::...:role/blog-agent-backup-role-production
 ```
 
 ---
@@ -395,30 +298,36 @@ jobs:
 
 ### ヘルスチェック
 
+**フロントエンド**
 ```bash
-# フロントエンド
-curl https://blog-agent.com
+# CloudFront URL
+curl -I https://xxxxx.cloudfront.net
 
-# バックエンドAPI
-curl -X GET https://api.blog-agent.com/health \
-  -H "Content-Type: application/json"
+# 期待レスポンス: HTTP/2 200
+```
 
-# 期待レスポンス
-# {"status": "healthy", "version": "1.0.0"}
+**API Gateway**
+```bash
+# API Endpoint
+curl https://xxxxx.execute-api.ap-northeast-1.amazonaws.com/production/health
+
+# 期待レスポンス: {"status": "healthy"}
 ```
 
 ### スモークテスト
 
 ```bash
-# 記事生成APIテスト
-curl -X POST https://api.blog-agent.com/articles/generate \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "テスト記事",
-    "contentPoints": "テスト内容",
-    "wordCount": 1000
-  }'
+# ログイン（トークン取得）
+TOKEN=$(aws cognito-idp initiate-auth \
+  --client-id $CLIENT_ID \
+  --auth-flow USER_PASSWORD_AUTH \
+  --auth-parameters USERNAME=$USER,PASSWORD=$PASS \
+  --query 'AuthenticationResult.IdToken' \
+  --output text)
+
+# 設定取得テスト
+curl -X GET https://api.example.com/production/settings \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
@@ -429,26 +338,32 @@ curl -X POST https://api.blog-agent.com/articles/generate \
 
 **1. CloudFrontがキャッシュを返し続ける**
 ```bash
-# 強制的にキャッシュクリア
 aws cloudfront create-invalidation \
-  --distribution-id E1234567890ABC \
+  --distribution-id $DIST_ID \
   --paths "/*"
 ```
 
 **2. Lambdaのタイムアウト**
 ```bash
-# タイムアウト時間を延長
 aws lambda update-function-configuration \
-  --function-name blog-agent-generate-article-prod \
+  --function-name blog-agent-generate-article-production \
   --timeout 90
 ```
 
 **3. DynamoDBのスロットリング**
+- CloudWatchでスロットリング状況を確認
+- PAY_PER_REQUEST（オンデマンド）モードを確認
+
+**4. CloudFormationスタックの更新失敗**
 ```bash
-# オンデマンドモードに変更
-aws dynamodb update-table \
-  --table-name blog-agent-articles-prod \
-  --billing-mode PAY_PER_REQUEST
+# ロールバック
+aws cloudformation cancel-update-stack \
+  --stack-name blog-agent-production
+
+# スタック状態の確認
+aws cloudformation describe-stacks \
+  --stack-name blog-agent-production \
+  --query 'Stacks[0].StackStatus'
 ```
 
 ---
@@ -457,24 +372,40 @@ aws dynamodb update-table \
 
 ### フロントエンドのロールバック
 
+**S3バージョニングから復元**
 ```bash
-# S3バージョニングから復元
+# バージョン一覧
 aws s3api list-object-versions \
-  --bucket blog-agent-frontend-prod \
+  --bucket $BUCKET_NAME \
   --prefix index.html
 
+# 特定バージョンに復元
 aws s3api copy-object \
-  --bucket blog-agent-frontend-prod \
-  --copy-source blog-agent-frontend-prod/index.html?versionId=VERSION_ID \
+  --bucket $BUCKET_NAME \
+  --copy-source $BUCKET_NAME/index.html?versionId=VERSION_ID \
   --key index.html
 ```
 
 ### バックエンドのロールバック
 
+**Lambda関数のバージョン切り替え**
 ```bash
-# CloudFormationスタックのロールバック
+# バージョン一覧
+aws lambda list-versions-by-function \
+  --function-name blog-agent-generate-article-production
+
+# エイリアスの更新（特定バージョンに切り替え）
+aws lambda update-alias \
+  --function-name blog-agent-generate-article-production \
+  --name live \
+  --function-version $VERSION
+```
+
+### CloudFormationのロールバック
+
+```bash
 aws cloudformation rollback-stack \
-  --stack-name blog-agent-prod
+  --stack-name blog-agent-production
 ```
 
 ---
@@ -487,6 +418,6 @@ aws cloudformation rollback-stack \
 
 ---
 
-**最終更新**: 2024-12-03  
-**レビュー者**: れんじろう  
-**次回レビュー**: 初回デプロイ後
+**最終更新**: 2026-01-10
+**レビュー者**: れんじろう
+**次回レビュー**: リリース後

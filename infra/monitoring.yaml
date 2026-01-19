@@ -1,0 +1,331 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Blog Agent Monitoring & Backup Configuration
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+
+  AlertEmail:
+    Type: String
+    Description: Email address for alerts
+    Default: ''
+
+Resources:
+  # ===========================================
+  # CloudWatch Alarms
+  # ===========================================
+
+  # API Gateway 5xx Errors
+  ApiGateway5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'blog-agent-api-5xx-${Environment}'
+      AlarmDescription: API Gateway 5xx errors exceeded threshold
+      MetricName: 5XXError
+      Namespace: AWS/ApiGateway
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref 'AWS::NoValue']
+      Dimensions:
+        - Name: ApiId
+          Value: !ImportValue
+            Fn::Sub: 'blog-agent-${Environment}-ApiGateway'
+
+  # API Gateway Latency
+  ApiGatewayLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'blog-agent-api-latency-${Environment}'
+      AlarmDescription: API Gateway latency exceeded threshold
+      MetricName: Latency
+      Namespace: AWS/ApiGateway
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 5000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref 'AWS::NoValue']
+
+  # Lambda Errors
+  LambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'blog-agent-lambda-errors-${Environment}'
+      AlarmDescription: Lambda function errors exceeded threshold
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref 'AWS::NoValue']
+
+  # Lambda Throttles
+  LambdaThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'blog-agent-lambda-throttles-${Environment}'
+      AlarmDescription: Lambda function throttling detected
+      MetricName: Throttles
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref 'AWS::NoValue']
+
+  # DynamoDB Read Throttle
+  DynamoDBReadThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'blog-agent-dynamodb-read-throttle-${Environment}'
+      AlarmDescription: DynamoDB read throttling detected
+      MetricName: ReadThrottledRequests
+      Namespace: AWS/DynamoDB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref 'AWS::NoValue']
+
+  # DynamoDB Write Throttle
+  DynamoDBWriteThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'blog-agent-dynamodb-write-throttle-${Environment}'
+      AlarmDescription: DynamoDB write throttling detected
+      MetricName: WriteThrottledRequests
+      Namespace: AWS/DynamoDB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref 'AWS::NoValue']
+
+  # ===========================================
+  # SNS Topic for Alerts
+  # ===========================================
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlertEmail
+    Properties:
+      TopicName: !Sub 'blog-agent-alerts-${Environment}'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  AlertTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ===========================================
+  # CloudWatch Dashboard
+  # ===========================================
+  MonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub 'blog-agent-${Environment}'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "API Gateway Requests",
+                "metrics": [
+                  ["AWS/ApiGateway", "Count", { "stat": "Sum", "period": 300 }],
+                  [".", "5XXError", { "stat": "Sum", "period": 300 }],
+                  [".", "4XXError", { "stat": "Sum", "period": 300 }]
+                ],
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "API Gateway Latency",
+                "metrics": [
+                  ["AWS/ApiGateway", "Latency", { "stat": "Average", "period": 300 }],
+                  [".", ".", { "stat": "p99", "period": 300 }]
+                ],
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Lambda Invocations & Errors",
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", { "stat": "Sum", "period": 300 }],
+                  [".", "Errors", { "stat": "Sum", "period": 300 }],
+                  [".", "Throttles", { "stat": "Sum", "period": 300 }]
+                ],
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Lambda Duration",
+                "metrics": [
+                  ["AWS/Lambda", "Duration", { "stat": "Average", "period": 300 }],
+                  [".", ".", { "stat": "p99", "period": 300 }]
+                ],
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "DynamoDB Operations",
+                "metrics": [
+                  ["AWS/DynamoDB", "ConsumedReadCapacityUnits", { "stat": "Sum", "period": 300 }],
+                  [".", "ConsumedWriteCapacityUnits", { "stat": "Sum", "period": 300 }]
+                ],
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 12,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "CloudFront Requests",
+                "metrics": [
+                  ["AWS/CloudFront", "Requests", { "stat": "Sum", "period": 300 }],
+                  [".", "4xxErrorRate", { "stat": "Average", "period": 300 }],
+                  [".", "5xxErrorRate", { "stat": "Average", "period": 300 }]
+                ],
+                "region": "us-east-1"
+              }
+            }
+          ]
+        }
+
+  # ===========================================
+  # Backup Plan
+  # ===========================================
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Sub 'blog-agent-vault-${Environment}'
+      BackupVaultTags:
+        Environment: !Ref Environment
+        Project: blog-agent
+
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Sub 'blog-agent-backup-plan-${Environment}'
+        BackupPlanRule:
+          - RuleName: DailyBackup
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: 'cron(0 3 * * ? *)'  # 毎日3:00 UTC
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 120
+            Lifecycle:
+              DeleteAfterDays: 30
+          - RuleName: WeeklyBackup
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: 'cron(0 3 ? * SUN *)'  # 毎週日曜 3:00 UTC
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 180
+            Lifecycle:
+              DeleteAfterDays: 90
+      BackupPlanTags:
+        Environment: !Ref Environment
+        Project: blog-agent
+
+  BackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref BackupPlan
+      BackupSelection:
+        SelectionName: !Sub 'blog-agent-backup-selection-${Environment}'
+        IamRoleArn: !GetAtt BackupRole.Arn
+        Resources:
+          - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/blog-agent-*-${Environment}'
+
+  BackupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'blog-agent-backup-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
+
+Outputs:
+  DashboardURL:
+    Description: CloudWatch Dashboard URL
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=blog-agent-${Environment}'
+
+  AlertTopicArn:
+    Description: Alert SNS Topic ARN
+    Condition: HasAlertEmail
+    Value: !Ref AlertTopic
+
+  BackupVaultArn:
+    Description: Backup Vault ARN
+    Value: !GetAtt BackupVault.BackupVaultArn

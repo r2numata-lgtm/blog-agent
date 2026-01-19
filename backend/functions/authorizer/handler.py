@@ -1,5 +1,5 @@
 """
-AWS Lambda Authorizer for API Gateway
+AWS Lambda Authorizer for API Gateway HTTP API (v2)
 Cognito JWTトークンを検証し、API Gatewayへのアクセスを制御する
 """
 
@@ -73,81 +73,67 @@ def verify_token(token: str) -> dict | None:
             }
         )
         return claims
-    except JWTError:
+    except JWTError as e:
+        print(f"JWT verification failed: {str(e)}")
         return None
-
-
-def generate_policy(principal_id: str, effect: str, resource: str, context: dict | None = None) -> dict:
-    """API Gateway用のIAMポリシードキュメントを生成"""
-    policy = {
-        "principalId": principal_id,
-        "policyDocument": {
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Action": "execute-api:Invoke",
-                    "Effect": effect,
-                    "Resource": resource,
-                }
-            ],
-        },
-    }
-
-    if context:
-        policy["context"] = context
-
-    return policy
 
 
 def handler(event: dict[str, Any], context: Any) -> dict:
     """
-    Lambda Authorizer ハンドラー
+    Lambda Authorizer ハンドラー (HTTP API v2 Simple Response Format)
 
     Args:
-        event: API Gatewayからのイベント
+        event: API Gateway HTTP API v2からのイベント
         context: Lambda実行コンテキスト
 
     Returns:
-        IAMポリシードキュメント
+        Simple response format: {"isAuthorized": bool, "context": dict}
     """
+    print(f"Authorizer event: {json.dumps(event)}")
+
     try:
-        # Authorizationヘッダーからトークンを取得
-        auth_header = event.get("authorizationToken", "")
-        method_arn = event.get("methodArn", "*")
+        # HTTP API v2 の場合、ヘッダーは identitySource から取得
+        # または headers オブジェクトから直接取得
+        auth_header = ""
+
+        # identitySource から取得を試みる
+        identity_source = event.get("identitySource", [])
+        if identity_source and len(identity_source) > 0:
+            auth_header = identity_source[0]
+
+        # headers から取得を試みる（フォールバック）
+        if not auth_header:
+            headers = event.get("headers", {})
+            auth_header = headers.get("authorization", "") or headers.get("Authorization", "")
+
+        print(f"Auth header: {auth_header[:50] if auth_header else 'empty'}...")
 
         # Bearer トークンの抽出
         if not auth_header.startswith("Bearer "):
-            return generate_policy("unauthorized", "Deny", method_arn)
+            print("No Bearer token found")
+            return {"isAuthorized": False}
 
         token = auth_header[7:]  # "Bearer " を除去
 
         # トークンを検証
         claims = verify_token(token)
         if not claims:
-            return generate_policy("unauthorized", "Deny", method_arn)
+            print("Token verification failed")
+            return {"isAuthorized": False}
 
         # ユーザー情報をコンテキストに追加
         user_context = {
             "userId": claims.get("sub", ""),
             "email": claims.get("email", ""),
-            "tokenUse": claims.get("token_use", ""),
         }
 
-        # 全てのリソースへのアクセスを許可（必要に応じて絞り込み可能）
-        # methodArnの形式: arn:aws:execute-api:region:account-id:api-id/stage/method/resource-path
-        # ワイルドカードで同一APIの全エンドポイントを許可
-        arn_parts = method_arn.split(":")
-        api_gateway_arn = ":".join(arn_parts[:5])
-        api_id_stage = arn_parts[5].split("/")[:2]
-        allowed_resource = f"{api_gateway_arn}:{'/'.join(api_id_stage)}/*"
+        print(f"Authorization successful for user: {user_context['userId']}")
 
-        return generate_policy(
-            principal_id=claims.get("sub", "user"),
-            effect="Allow",
-            resource=allowed_resource,
-            context=user_context,
-        )
+        return {
+            "isAuthorized": True,
+            "context": user_context,
+        }
 
     except Exception as e:
         print(f"Authorizer error: {str(e)}")
-        return generate_policy("unauthorized", "Deny", event.get("methodArn", "*"))
+        return {"isAuthorized": False}

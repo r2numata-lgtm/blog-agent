@@ -1,14 +1,200 @@
 # 変更ログ
 
-**ドキュメントバージョン**: 2.0  
-**最終更新日**: 2026-01-04  
+**ドキュメントバージョン**: 3.0
+**最終更新日**: 2026-01-10
 **関連ドキュメント**: 全ドキュメント
 
 ---
 
 ## 📝 変更履歴
 
-### 2026-01-04: Phase 0完了 - Gutenberg Library技術検証完了
+### 2026-01-10: Phase 6 Week 18-19完了 - UI/UX改善・本番環境構築
+
+**変更内容**
+
+#### P6-01〜04: UI/UX改善
+- 共通UIコンポーネントライブラリ作成（components/ui/）
+  - Button: バリアント、サイズ、ローディング状態
+  - Input: ラベル、エラー表示、アイコン対応
+  - Card: ヘッダー、コンテンツ、フッター、統計カード
+  - Alert: 4タイプ（success/error/warning/info）
+  - Loading: スピナー、スケルトン、プログレス
+  - Modal: 確認ダイアログ、フォーカストラップ
+  - Toast: 通知システム（ToastProvider）
+  - Tutorial: ステップガイド、ウェルカムモーダル
+- LoginPage UI刷新（グラデーション背景、カードデザイン）
+- Cognito エラーメッセージの日本語化
+
+#### P6-05〜08: 本番環境構築
+- CloudFormationテンプレート作成（infra/cloudformation.yaml）
+  - S3 + CloudFront（フロントエンドホスティング）
+  - API Gateway HTTP API
+  - DynamoDB（Articles, Settings, Conversations）
+  - Lambda実行ロール
+- GitHub Actions CI/CD作成
+  - ci.yml: Lint、ユニットテスト、E2Eテスト
+  - deploy.yml: CloudFormation、S3、Lambda デプロイ
+- モニタリング設定（infra/monitoring.yaml）
+  - CloudWatchアラーム（5xx, Latency, Lambda Errors）
+  - CloudWatchダッシュボード
+  - SNS通知トピック
+- バックアップ設定
+  - AWS Backup Vault
+  - 日次/週次バックアップ
+
+**影響範囲**
+- **00_project_overview.md** - v3.0に更新、進捗状況追加
+- **08_deployment_guide.md** - v2.0に更新、実装内容を反映
+- **99_task_management.md** - P6-01〜P6-08を完了に更新
+
+---
+
+### 2026-01-10: Phase 5 Week 17完了 - 統合テスト
+
+**変更内容**
+
+#### P5-09〜12: 統合テスト
+- テスト環境構築
+  - Vitest + jsdom（ユニットテスト）
+  - Playwright（E2Eテスト）
+  - vitest.config.ts, playwright.config.ts作成
+- ユニットテスト作成（30件）
+  - exportUtils.test.ts（11件）
+  - articleStorage.test.ts（19件）
+- E2Eテスト作成（9ファイル）
+  - auth.spec.ts: 認証フロー
+  - navigation.spec.ts: ナビゲーション
+  - articles.spec.ts: 記事管理
+  - editor.spec.ts: エディタ
+  - generate.spec.ts: 記事生成
+  - settings.spec.ts: 設定
+  - performance.spec.ts: パフォーマンス
+  - security.spec.ts: セキュリティ
+  - browser-compatibility.spec.ts: ブラウザ互換性
+
+**技術的な発見**
+- localStorage モックは Object.defineProperty で設定が必要
+- テストファイルは tsconfig.app.json の exclude に追加が必要
+
+**影響範囲**
+- **frontend/package.json** - テストスクリプト追加
+- **frontend/vitest.config.ts** - 新規作成
+- **frontend/playwright.config.ts** - 新規作成
+- **frontend/tsconfig.app.json** - exclude設定追加
+- **99_task_management.md** - P5-09〜P5-12を完了に更新
+
+---
+
+### 2026-01-09: Phase 4・5完了 - Gutenbergエディタ・出力機能・記事管理
+
+**変更内容**
+
+#### Phase 4: Gutenbergエディタ（P4-01〜P4-16）
+- エディタ基盤
+  - GutenbergEditor.tsx: 本格的なブロックエディタ
+  - EditorPage.tsx: エディタページ
+  - BlockEditorProvider統合
+- ブロック実装
+  - 基本: paragraph, heading, list, quote
+  - 装飾: group, columns, table, separator
+  - カスタム: blog-agent/box, blog-agent/balloon
+- プレビュー機能
+  - リアルタイムプレビュー
+  - WordPressテーマ風スタイル
+  - レスポンシブ切り替え（PC/タブレット/モバイル）
+- ブロック操作
+  - ドラッグ&ドロップ並び替え
+  - ブロック追加メニュー
+  - 設定パネル（BlockInspector）
+  - 履歴管理、キーボードショートカット
+
+#### Phase 5 Week 15-16: 出力機能・記事管理（P5-01〜P5-08）
+- エクスポート機能
+  - exportUtils.ts
+  - Gutenbergブロック形式、HTML、JSON出力
+- 記事管理
+  - articleStorage.ts: LocalStorage管理
+  - ArticlesPage.tsx: 記事一覧ページ
+  - 検索・フィルタ・ソート機能
+
+**影響範囲**
+- **99_task_management.md** - Phase 4, 5を完了に更新
+
+---
+
+### 2026-01-07: Phase 2・3完了 - 記事生成・チャット修正
+
+**変更内容**
+
+#### Phase 2: 記事生成コア（P2-01〜P2-16）
+- プロンプト設計
+  - prompt_builder.py: プロンプト構築
+  - スタイル/サンプル記事/内部リンクの反映
+- 記事生成Lambda
+  - app.py: generate_article, generate_titles, generate_meta
+  - validators.py: 入力検証
+  - utils.py: ユーティリティ
+- フロントエンド
+  - GeneratePage.tsx: 記事生成フォーム
+  - markdownToBlocks.ts: Gutenbergブロック変換
+  - customBlocks.ts: カスタムブロック定義
+- 統合テスト・エラーハンドリング
+  - ErrorBoundary.tsx
+  - errorHandler.ts（リトライ機能付き）
+
+#### Phase 3: チャット修正（P3-01〜P3-12）
+- チャット基盤
+  - chat-edit Lambda関数
+  - DynamoDB conversations テーブル
+  - diff_utils.py: 差分検出・適用
+- チャットUI
+  - ChatPanel.tsx, ChatInput.tsx, ChatHistory.tsx
+  - ChatMessage.tsx: 個別メッセージ
+- 修正履歴
+  - DiffViewer.tsx: 差分表示
+  - RevisionList.tsx: リビジョン管理
+  - 最大10件の履歴保存
+
+**影響範囲**
+- **99_task_management.md** - Phase 2, 3を完了に更新
+
+---
+
+### 2026-01-07: Phase 1完了 - 認証・初期設定
+
+**変更内容**
+
+#### Week 2: 認証基盤（P1-01〜P1-04）
+- Cognito User Pool作成
+  - Pool ID: ap-northeast-1_NhI2bZRA1
+  - App Client作成
+- 認証画面実装
+  - LoginPage, RegisterPage, ConfirmPage
+  - cognito.ts: 認証サービス
+  - AuthContext.tsx: 認証状態管理
+- JWT認証フロー
+  - トークン自動リフレッシュ
+  - Lambda Authorizer
+- パスワードリセット機能
+
+#### Week 3: 記事初期設定（P1-05〜P1-09）
+- 記事スタイル設定画面
+  - テイスト/一人称/読者呼びかけ/トーン
+- サンプル記事アップロード
+  - HTML/Markdownファイル対応
+- 装飾プリセット設定
+  - ボックス/吹き出し/引用のON/OFF
+  - SEO設定
+- 設定保存API
+  - manage-settings Lambda
+  - Zustandストア + localStorage永続化
+
+**影響範囲**
+- **99_task_management.md** - Phase 1を完了に更新
+
+---
+
+### 2026-01-04: Phase 0完了 - Gutenberg技術検証
 
 **変更内容**
 - P0-06タスク完了
@@ -18,42 +204,20 @@
 - 9つの検証項目すべてクリア
 
 **検証結果**
-✅ **Gutenbergライブラリは Blog Agent で使用可能**
-
-確認できた機能:
-1. ブロックデータが作成できる
-2. 段落ブロックが動作する
-3. 見出しブロックが動作する
-4. リストブロックが動作する
-5. 画像ブロックが動作する
-6. 引用ブロックが動作する
-7. コードブロックが動作する
-8. HTMLへの変換ができる
-9. WordPress形式のコメントが含まれる
-
-**技術的な発見**
-- React 19はGutenbergライブラリと互換性なし
-- React 18.3.xが必要
-- `createBlock`関数と`serialize`関数で簡単にブロック生成・変換可能
-- WordPress形式のHTMLコメント（`<!-- wp:paragraph -->`）が自動生成される
-
-**理由**
-Phase 0の最終タスクとして、Blog Agentの核となるGutenberg機能が実装可能か確認する必要があった
+- Gutenbergライブラリは Blog Agent で使用可能
+- createBlock, serialize関数で簡単にブロック生成・変換可能
+- WordPress形式のHTMLコメントが自動生成される
 
 **影響範囲**
-- **99_task_management.md** - P0-06を完了に更新、Phase 0が100%完了
-- **10_change_log.md** - 本エントリ追加
-- **frontend/package.json** - React 18にダウングレード、Gutenbergパッケージ追加
-
-**次のステップ**
-- Phase 1（認証・初期設定）に進む準備が整った
+- **frontend/package.json** - React 18ダウングレード
+- **99_task_management.md** - Phase 0が100%完了
 
 ---
 
 ### 2026-01-03: 戦略的ピボット - MVPから本格開発へ
 
 **変更内容**
-開発アプローチを全面的に見直し、MVP（Minimum Viable Product）方式から本格開発方式に変更
+開発アプローチを全面的に見直し
 
 **主要な変更点:**
 1. **出力形式**: Markdown/HTML → Gutenbergブロック形式
@@ -62,92 +226,9 @@ Phase 0の最終タスクとして、Blog Agentの核となるGutenberg機能が
 4. **開発期間**: 3ヶ月 → 4-5ヶ月
 5. **開発費用**: $396 → $905
 
-**理由**
-
-#### なぜGutenbergに変更したのか
-1. **WordPress互換性の向上**
-   - Markdownプラグインは別途インストールが必要
-   - Gutenbergは標準エディタのため追加設定不要
-   - テーマとの互換性が最も高い
-
-2. **ユーザー体験の向上**
-   - WordPressで直接編集できる
-   - プレビューと実際の表示が一致
-   - 装飾・レイアウトがそのまま反映
-
-3. **差別化ポイントの明確化**
-   - 単なる記事生成ツールではなく「WordPress専用」に特化
-   - チャットベース修正は競合との差別化要素
-
-#### なぜ入力をシンプルにしたのか
-1. **ユーザー負担の軽減**
-   - タイトル、キーワードなどはAIに任せる
-   - ユーザーは「何を書きたいか」だけに集中
-
-2. **AI能力の最大活用**
-   - Claude APIは要点から全体を構成する能力が高い
-   - 細かい指定より、本質的な内容を伝える方が良い結果
-
-#### なぜチャット修正を追加したのか
-1. **1回の生成では完璧にならない現実**
-   - 対話的な改善が自然なUX
-   - WordやGoogleドキュメントの「提案」機能のように
-
-2. **Claude APIの強み**
-   - 会話履歴を保持できる
-   - 文脈を理解した修正が可能
-
-#### なぜ記事初期設定を追加したのか
-1. **ブログ全体の統一感**
-   - 同じブログなら、トーンや文体を揃えたい
-   - サンプル記事から学習することで実現
-
-2. **装飾の一貫性**
-   - 毎回同じ装飾を指定する手間を省く
-   - ブランドイメージの統一
-
 **影響範囲**
-
-#### ドキュメントの全面改訂
-- **00_project_overview.md** → v2.0（全面改訂）
-- **01_requirements.md** → v2.0（全面改訂）
-- **02_architecture.md** → 要更新（Gutenbergエディタライブラリ追加）
-- **03_database_schema.md** → 要更新（記事初期設定テーブル追加）
-- **04_api_specification.md** → 要更新（新API追加）
-- **05_frontend_design.md** → 要更新（Gutenbergエディタ追加）
-- **06_backend_design.md** → 要更新（チャット修正Lambda追加）
-- **07_prompt_templates.md** → 要更新（新プロンプト追加）
-- **08_deployment_guide.md** → 影響小
-- **09_testing_strategy.md** → 要更新（新機能テスト追加）
-- **10_change_log.md** → 本エントリ追加
-- **99_task_management.md** → 全面改訂（タスク再構成）
-
-#### コードベースへの影響
-- フロントエンド: ほぼ全面作り直し
-- バックエンド: 大幅な変更
-- プロンプト: 全面作り直し
-
-#### 開発スケジュールへの影響
-- **旧**: 3ヶ月（12週間）
-- **新**: 4-5ヶ月（20週間）
-- 理由: Gutenbergエディタ実装の複雑さ、チャット修正機能の追加
-
-#### 予算への影響
-- **旧**: 開発中 $132/月 × 3ヶ月 = $396
-- **新**: 開発中 $181/月 × 5ヶ月 = $905
-- 増加理由: 開発期間延長、Claude API使用量増加（チャット修正）
-
-**対応タスク**
-
-すべてのタスクを再構成（99_task_management.md参照）
-
-主要な新規フェーズ:
-- Phase 1: 認証・初期設定（Week 2-3）
-- Phase 2: 記事生成コア（Week 4-7）
-- Phase 3: チャット修正（Week 8-10）
-- Phase 4: Gutenbergエディタ（Week 11-14）
-- Phase 5: 統合・テスト（Week 15-17）
-- Phase 6: リリース（Week 18-20）
+- 全ドキュメントの全面改訂（v2.0）
+- タスク管理の再構成
 
 ---
 
@@ -156,22 +237,6 @@ Phase 0の最終タスクとして、Blog Agentの核となるGutenberg機能が
 **変更内容**
 - 全モジュールドキュメント（12ファイル）の初版作成
 - プロジェクト構成の決定
-- MVP（Option A）の範囲確定
-
-**理由**
-- プロジェクト開始
-- 開発体制の確立
-- ナレッジの体系化
-
-**影響範囲**
-- 全ドキュメント（00-99）
-
-**対応タスク**
-- P0-01: GitHubリポジトリ作成
-- P0-02: モジュールファイル生成
-- P0-03: Claude Project作成
-
-**備考**: MVP方針は上記の全面見直しにより変更
 
 ---
 
@@ -200,28 +265,29 @@ Phase 0の最終タスクとして、Blog Agentの核となるGutenberg機能が
 
 ---
 
-## 📊 ドキュメント依存関係マップ
+## 📊 プロジェクト進捗サマリー
 
-```
-00_project_overview.md (v2.0) (全体概要)
-├── 01_requirements.md (v2.0) (要件)
-│   ├── 02_architecture.md (技術選定に影響) - 要更新
-│   ├── 05_frontend_design.md (UI要件に影響) - 要更新
-│   └── 09_testing_strategy.md (テスト要件に影響) - 要更新
-│
-├── 02_architecture.md (システム構成) - 要更新
-│   ├── 03_database_schema.md (DB設計) - 要更新
-│   ├── 04_api_specification.md (API設計) - 要更新
-│   ├── 05_frontend_design.md (技術スタック) - 要更新
-│   ├── 06_backend_design.md (Lambda設計) - 要更新
-│   └── 08_deployment_guide.md (デプロイ構成)
-│
-├── 07_prompt_templates.md - 要更新
-│
-├── 10_change_log.md (v2.0) (このファイル)
-│
-└── 99_task_management.md (v2.0) (タスク管理)
-```
+### Phase別完了状況（2026-01-10時点）
+
+| Phase | 期間 | タスク | 完了 | 進捗 |
+|-------|------|--------|------|------|
+| Phase 0: セットアップ | Week 1 | 6 | 6 | 100% |
+| Phase 1: 認証・初期設定 | Week 2-3 | 9 | 9 | 100% |
+| Phase 2: 記事生成コア | Week 4-7 | 16 | 16 | 100% |
+| Phase 3: チャット修正 | Week 8-10 | 12 | 12 | 100% |
+| Phase 4: Gutenbergエディタ | Week 11-14 | 16 | 16 | 100% |
+| Phase 5: 統合・テスト | Week 15-17 | 12 | 12 | 100% |
+| Phase 6: リリース | Week 18-20 | 13 | 8 | 62% |
+| **合計** | | **84** | **79** | **94%** |
+
+### 主要マイルストーン
+
+- [x] 2026-01-03: プロジェクト開始
+- [x] 2026-01-04: Phase 0完了（技術検証）
+- [x] 2026-01-07: Phase 1-3完了（認証、記事生成、チャット修正）
+- [x] 2026-01-09: Phase 4-5完了（エディタ、出力、記事管理）
+- [x] 2026-01-10: Phase 6 Week 18-19完了（UI/UX、本番環境）
+- [ ] Phase 6 Week 20: 最終準備・リリース
 
 ---
 
@@ -231,5 +297,5 @@ Phase 0の最終タスクとして、Blog Agentの核となるGutenberg機能が
 
 ---
 
-**最終更新**: 2026-01-04  
-**次回レビュー**: Phase 1完了時
+**最終更新**: 2026-01-10
+**次回レビュー**: リリース後
