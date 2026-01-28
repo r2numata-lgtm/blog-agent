@@ -30,6 +30,11 @@ backend/functions/**/bin/
 .env
 .env.local
 .env.production
+frontend/.env.prod
+backend/.env
+
+# Claude Code local settings
+.claude/
 
 # Build outputs
 dist/
