@@ -1,8 +1,173 @@
 # バックエンド設計
 
-**ドキュメントバージョン**: 1.0  
-**最終更新日**: 2024-12-03  
+**ドキュメントバージョン**: 2.0
+**最終更新日**: 2026-01-19
 **関連ドキュメント**: 02_architecture.md, 04_api_specification.md
+
+---
+
+## 🎯 設計原則（重要）
+
+### 装飾role/CSS分離の原則
+
+1. **意味（role）と見た目（CSS）の完全分離**
+   - Claudeが扱うのは意味（role）のみ
+   - CSS / class名 / styleは人間（DB・アプリ側）の責務
+
+2. **固定roleセット**
+   ```typescript
+   type DecorationRole =
+     | "attention"   // 重要な主張・強調
+     | "warning"     // 注意・失敗・リスク
+     | "summarize"   // 要点整理・まとめ
+     | "explain"     // 解説・定義
+     | "action";     // 行動促進
+   ```
+
+3. **制約ルール**
+   - 同一decorationIdの連続使用は禁止
+   - 同一roleは1記事最大3回まで
+   - 対応装飾が存在しないroleは装飾しない
+
+---
+
+## 📝 2段階記事生成フロー
+
+### フロー概要
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    2段階記事生成フロー                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  [ユーザー入力]                                                  │
+│       ↓                                                          │
+│  ┌────────────────────────────────────────┐                      │
+│  │  Step 1: 構造生成（Claude API 1回目）    │                    │
+│  │  - テーマ・キーワード                    │                    │
+│  │  - articleTone                          │                    │
+│  │  - sampleArticle                        │                    │
+│  │  - 利用可能role一覧（5種）               │                    │
+│  │  ※ decorationId/class/CSSは渡さない     │                    │
+│  └────────────────────────────────────────┘                      │
+│       ↓                                                          │
+│  [構造JSON（roles付き）]                                         │
+│       ↓                                                          │
+│  ┌────────────────────────────────────────┐                      │
+│  │  role → decorationId マッピング          │                    │
+│  │  （バックエンドで処理）                   │                    │
+│  └────────────────────────────────────────┘                      │
+│       ↓                                                          │
+│  ┌────────────────────────────────────────┐                      │
+│  │  Step 2: 出力生成（Claude API 2回目）    │                    │
+│  │  - Step1の構造JSON                      │                    │
+│  │  - outputFormat (wordpress/markdown)    │                    │
+│  │  - roleToDecoration マッピングテーブル   │                    │
+│  │  ※ class名/CSSは渡さない                │                    │
+│  └────────────────────────────────────────┘                      │
+│       ↓                                                          │
+│  [WordPress: JSONブロック / Markdown: 標準MD]                    │
+│       ↓                                                          │
+│  ┌────────────────────────────────────────┐                      │
+│  │  バックエンド後処理                       │                    │
+│  │  - decorationId → class変換              │                    │
+│  │  - Gutenbergブロック組立                 │                    │
+│  └────────────────────────────────────────┘                      │
+│       ↓                                                          │
+│  [最終出力]                                                      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Step 1: 構造生成
+
+**入力として渡すもの**
+- ユーザ入力（テーマ・キーワード）
+- DBから取得した articleTone
+- DBから取得した sampleArticle
+- 利用可能な role 一覧（5種）
+- ※ decorationId / class / CSS は渡さない
+
+**Claudeへの指示**
+- 記事構成を整理する
+- 各段落・要素に該当する role を付与
+- 出力は JSONのみ
+- HTML / Markdown / CSS を書かない
+
+**出力フォーマット**
+```json
+{
+  "title": "記事タイトル",
+  "sections": [
+    {
+      "heading": "見出し",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "本文テキスト",
+          "roles": ["attention"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Step 2: 出力生成
+
+**入力として渡すもの**
+- Step1の構造JSON
+- 出力形式（"wordpress" or "markdown"）
+- DBから生成した role → decorationId 対応表
+
+```json
+{
+  "roleToDecoration": {
+    "attention": "point",
+    "warning": "warning",
+    "summarize": "summary"
+  }
+}
+```
+※ class名・CSSは渡さない
+
+**WordPress出力時の指示**
+- Gutenbergブロック前提で出力
+- 装飾が必要な場合は decorationId のみ付与
+- class名・style属性・CSS生成は禁止
+
+```json
+{
+  "blockType": "paragraph",
+  "content": "重要な結論です",
+  "decorationId": "point"
+}
+```
+
+**Markdown出力時の指示**
+- 標準Markdownのみ使用
+- 装飾・roles・decorationId は出力しない
+
+### バックエンド後処理
+
+**WordPress出力時**
+1. decorationId → DB から class を取得
+2. Gutenbergブロックに className を付与
+3. 記事全体を .ba-article でラップ
+
+```html
+<div class="ba-article">
+  <!-- wp:paragraph -->
+  <p>通常の段落</p>
+  <!-- /wp:paragraph -->
+
+  <!-- wp:html -->
+  <div class="ba-point">
+    <p>重要なポイント</p>
+  </div>
+  <!-- /wp:html -->
+</div>
+```
 
 ---
 

@@ -30,8 +30,19 @@ class DecorationWithRoles(TypedDict):
     id: str
     label: str
     roles: List[str]  # 'attention', 'warning', 'summarize', 'explain', 'action'
+    schema: str  # 'paragraph', 'box', 'list', 'table', 'callout'
     css: str
     enabled: bool
+
+
+# スキーマの説明
+SCHEMA_DESCRIPTIONS = {
+    'paragraph': 'インライン装飾。テキストの一部を強調するために使用。文中のキーワードや重要フレーズに適用。',
+    'box': 'ボックス装飾。まとまった情報を囲んで目立たせる。補足説明、注意事項、ポイントのまとめに適用。タイトルを付けることが可能。',
+    'list': 'リスト装飾。箇条書きや番号付きリストを装飾。手順や列挙に使用。',
+    'table': 'テーブル装飾。表形式のデータを装飾。比較表やデータ一覧に使用。',
+    'callout': 'コールアウト装飾。特に目立たせたい情報に使用。警告や重要な通知に適用。'
+}
 
 
 # 意味的ロールの定義
@@ -548,10 +559,25 @@ def get_available_roles(decorations: List[DecorationWithRoles]) -> List[str]:
     return list(roles)
 
 
+def get_enabled_decorations(decorations: List[DecorationWithRoles]) -> List[dict]:
+    """有効な装飾の詳細情報を取得（CSSは除外）"""
+    enabled = []
+    for dec in decorations:
+        if dec.get('enabled', True):
+            enabled.append({
+                'id': dec.get('id'),
+                'label': dec.get('label'),
+                'schema': dec.get('schema', 'paragraph'),
+                'roles': dec.get('roles', [])
+            })
+    return enabled
+
+
 def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] = None) -> str:
     """
-    Step 1: 記事構造をJSON形式で生成（roleのみ、CSSなし）
-    Claudeは意味的なroleのみを判断し、具体的な装飾IDは決めない
+    Step 1: 記事構造をJSON形式で生成
+    Claudeは利用可能な装飾の中から適切なものを選び、decorationIdを直接指定する
+    boxスキーマの装飾にはtitleを付ける
     """
     settings = settings or {}
 
@@ -569,8 +595,8 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
     decorations = settings.get('decorations', [])
     sample_articles = settings.get('sampleArticles', [])
 
-    # 利用可能なrolesを取得
-    available_roles = get_available_roles(decorations) if isinstance(decorations, list) else []
+    # 有効な装飾の詳細を取得
+    enabled_decorations = get_enabled_decorations(decorations) if isinstance(decorations, list) else []
 
     # 文体指示
     style_instructions = build_style_instructions(article_style)
@@ -581,23 +607,37 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
     # 記事タイプ指示
     article_type_instructions = build_article_type_instructions(article_type)
 
-    # 利用可能なroles説明
-    roles_explanation = ""
-    if available_roles:
-        role_descriptions = []
-        for role in available_roles:
-            if role in SEMANTIC_ROLES:
-                role_descriptions.append(f'- "{role}": {SEMANTIC_ROLES[role]}')
-        roles_explanation = f"""## 使用可能な意味的ロール
-以下のroleを適切な箇所で使用してください。roleは段落やブロックの「意味・目的」を表します。
+    # 利用可能な装飾の説明
+    decorations_explanation = ""
+    if enabled_decorations:
+        decoration_list = []
+        for dec in enabled_decorations:
+            schema = dec.get('schema', 'paragraph')
+            schema_desc = SCHEMA_DESCRIPTIONS.get(schema, '')
+            roles = ', '.join(dec.get('roles', []))
+            decoration_list.append(f'''- **{dec["id"]}** ({dec["label"]})
+  - スキーマ: {schema} - {schema_desc}
+  - 用途: {roles}''')
 
-{chr(10).join(role_descriptions)}
+        decorations_explanation = f"""## 利用可能な装飾（重要）
+以下の装飾のみ使用できます。**これ以外の装飾IDは使用禁止です。**
 
-### ロール使用のガイドライン
-- 同じroleを連続して使わない
-- 1記事内で同じroleは最大3回まで
-- roleが不要な通常の段落はrolesを空配列[]にする
-- 装飾に頼りすぎず、本文の流れを重視する"""
+{chr(10).join(decoration_list)}
+
+### 装飾使用のガイドライン
+- 装飾を使う場合は、上記リストのdecorationIdを指定する
+- スキーマの種類に応じて適切に使い分ける:
+  - paragraph: 文中の一部を強調したい場合（短いフレーズやキーワード）
+  - box: まとまった情報をボックスで囲みたい場合（**詳細な説明が必要**）
+- 同じdecorationIdを連続して使わない
+- 1記事内で同じdecorationIdは最大3回まで
+- 装飾が不要な通常の段落はdecorationIdを省略する
+
+### boxスキーマの装飾について（重要）
+- **title**: 内容を短く要約した見出し（10〜20文字程度）
+- **content**: ボックス内の本文。**必ず3〜5文の詳細な説明を記述すること**
+  - 単なる一言の要約ではなく、具体的な説明、理由、例などを含める
+  - 読者にとって価値のある情報をまとめて提供する"""
 
     prompt = f"""あなたはブログ記事生成の専門家です。以下の情報をもとに、記事の構造をJSON形式で生成してください。
 
@@ -616,7 +656,7 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
 
 {article_type_instructions}
 
-{roles_explanation}
+{decorations_explanation}
 
 {sample_context}
 
@@ -632,19 +672,23 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
       "blocks": [
         {{
           "type": "paragraph",
-          "content": "段落の内容",
-          "roles": []
+          "content": "通常の段落です。ここには記事の本文を記載します。読者に伝えたい情報を分かりやすく説明してください。"
         }},
         {{
           "type": "paragraph",
-          "content": "重要なポイントの内容",
-          "roles": ["attention"]
+          "content": "ボックス装飾の内容は詳細に書きます。まず、このポイントが重要な理由を説明します。次に、具体的な例や根拠を示します。さらに、読者が実践する際の注意点も加えると良いでしょう。最後に、このポイントを押さえることで得られるメリットをまとめます。",
+          "decorationId": "ba-point",
+          "title": "押さえるべき重要ポイント"
+        }},
+        {{
+          "type": "paragraph",
+          "content": "特に強調したいキーワードやフレーズ",
+          "decorationId": "ba-highlight"
         }},
         {{
           "type": "list",
           "listType": "unordered",
-          "items": ["項目1", "項目2", "項目3"],
-          "roles": []
+          "items": ["項目1の説明文", "項目2の説明文", "項目3の説明文"]
         }},
         {{
           "type": "subsection",
@@ -652,8 +696,7 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
           "blocks": [
             {{
               "type": "paragraph",
-              "content": "小見出し内の内容",
-              "roles": []
+              "content": "小見出し内の詳細な説明を記載します。"
             }}
           ]
         }}
@@ -667,16 +710,25 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
 ```
 
 ## ブロックタイプ
-- "paragraph": 通常の段落
+- "paragraph": 通常の段落（decorationIdで装飾可能）
 - "list": リスト（listType: "unordered" または "ordered"）
 - "subsection": H3小見出しセクション（blocks配列を含む）
+
+## 装飾の指定方法
+- boxスキーマの装飾:
+  - decorationIdとtitleを両方指定
+  - title: 短い見出し（10〜20文字）
+  - content: **詳細な説明文（3〜5文、100文字以上）** ← 重要！一言で終わらせない
+- paragraphスキーマの装飾: decorationIdのみ指定（titleは不要、contentは短いフレーズ）
+- 装飾なし: decorationIdを省略
 
 ## 制約条件
 - sections数（H2見出し）: 3〜6個
 - 各sectionにblocks: 2〜5個
-- roles付きブロック: 記事全体で2〜5箇所
-- 同じroleの連続使用禁止
-- 同じroleは記事内で最大3回
+- 装飾付きブロック: 記事全体で2〜5箇所
+- 同じdecorationIdの連続使用禁止
+- 同じdecorationIdは記事内で最大3回
+- **利用可能な装飾リストにないdecorationIdは絶対に使用しない**
 
 **重要: JSONのみを出力してください。説明文や前置きは不要です。**"""
 

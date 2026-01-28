@@ -21,20 +21,122 @@ export type SemanticRole = 'attention' | 'warning' | 'summarize' | 'explain' | '
 
 // 意味的ロールのラベル定義
 export const SEMANTIC_ROLES: Record<SemanticRole, { label: string; description: string }> = {
-  attention: { label: '注目', description: '重要なポイントを強調' },
-  warning: { label: '警告', description: '注意点や警告' },
-  summarize: { label: '要約', description: 'まとめや要点' },
-  explain: { label: '説明', description: '詳しい説明' },
-  action: { label: '行動', description: '次のステップやアクション' },
+  attention: { label: '注目', description: '重要な主張・結論' },
+  warning: { label: '警告', description: '注意・失敗・リスク' },
+  summarize: { label: '要約', description: '要点整理・まとめ' },
+  explain: { label: '説明', description: '解説・定義・補足' },
+  action: { label: '行動', description: '行動促進・CTA' },
 };
 
-// 新スキーマ: roles対応の装飾設定
+// ============================================================
+// Schema（構造）型定義
+// ============================================================
+export type DecorationSchema = 'paragraph' | 'box' | 'list' | 'steps' | 'table' | 'callout';
+
+// Schema Optionsの型定義
+export interface BoxOptions {
+  title: {
+    required: boolean;
+    source: 'claude';
+  };
+}
+
+export interface ListOptions {
+  ordered: boolean;
+}
+
+export interface StepsOptions {
+  stepTitle: {
+    enabled: boolean;
+    source: 'claude';
+  };
+}
+
+export interface TableOptions {
+  headers: {
+    required: boolean;
+    source: 'claude';
+  };
+}
+
+export interface CalloutOptions {
+  buttonText: {
+    source: 'claude';
+  };
+}
+
+// SchemaOptionsのユニオン型
+export type SchemaOptions =
+  | Record<string, never> // paragraph
+  | BoxOptions // box
+  | ListOptions // list
+  | StepsOptions // steps
+  | TableOptions // table
+  | CalloutOptions; // callout
+
+// Schemaのラベル定義
+export const SCHEMA_LABELS: Record<DecorationSchema, { label: string; description: string }> = {
+  paragraph: { label: '段落', description: 'シンプルな段落テキスト' },
+  box: { label: 'ボックス', description: 'タイトル付きの囲みボックス' },
+  list: { label: 'リスト', description: '箇条書きまたは番号付きリスト' },
+  steps: { label: 'ステップ', description: '手順を示すステップリスト' },
+  table: { label: 'テーブル', description: '比較や一覧の表' },
+  callout: { label: 'コールアウト', description: '行動を促すCTAブロック' },
+};
+
+// Role × Schema 制限マップ
+export const ROLE_SCHEMA_CONSTRAINTS: Record<SemanticRole, DecorationSchema[]> = {
+  attention: ['paragraph', 'box'],
+  warning: ['paragraph', 'box'],
+  summarize: ['paragraph', 'box', 'list'],
+  explain: ['paragraph', 'box', 'table'],
+  action: ['callout'],
+};
+
+// ============================================================
+// 装飾設定の型定義
+// ============================================================
+
+// 新スキーマ: roles + schema対応の装飾設定
 export interface DecorationWithRoles {
   id: string;
   label: string;
   roles: SemanticRole[];
+  schema: DecorationSchema;
+  options: SchemaOptions;
+  class: string;
   css: string;
   enabled: boolean;
+}
+
+// バリデーション関数
+export function validateRoleSchemaConstraint(roles: SemanticRole[], schema: DecorationSchema): boolean {
+  return roles.every((role) => ROLE_SCHEMA_CONSTRAINTS[role]?.includes(schema));
+}
+
+export function getAvailableSchemasForRoles(roles: SemanticRole[]): DecorationSchema[] {
+  if (roles.length === 0) return [];
+  const allSchemas: DecorationSchema[] = ['paragraph', 'box', 'list', 'steps', 'table', 'callout'];
+  return allSchemas.filter((schema) => roles.every((role) => ROLE_SCHEMA_CONSTRAINTS[role]?.includes(schema)));
+}
+
+// Schema用のデフォルトオプションを取得
+export function getDefaultOptionsForSchema(schema: DecorationSchema): SchemaOptions {
+  switch (schema) {
+    case 'box':
+      return { title: { required: true, source: 'claude' } };
+    case 'list':
+      return { ordered: false };
+    case 'steps':
+      return { stepTitle: { enabled: true, source: 'claude' } };
+    case 'table':
+      return { headers: { required: true, source: 'claude' } };
+    case 'callout':
+      return { buttonText: { source: 'claude' } };
+    case 'paragraph':
+    default:
+      return {};
+  }
 }
 
 // 旧スキーマ: 後方互換性のため保持
@@ -75,62 +177,95 @@ export interface UserSettings {
   lastUpdated: string | null;
 }
 
-// デフォルト装飾設定（新スキーマ）
+// デフォルト装飾設定（新スキーマ: roles + schema対応）
+// 注意: タイトルはClaudeが動的に生成し、HTMLで出力される
 export const DEFAULT_DECORATIONS: DecorationWithRoles[] = [
+  // attention + paragraph: インラインハイライト
   {
     id: 'ba-highlight',
     label: 'ハイライト',
     roles: ['attention'],
-    css: '.ba-highlight { background: linear-gradient(transparent 60%, #fff59d 60%); padding: 0 4px; font-weight: 600; }',
+    schema: 'paragraph',
+    options: {},
+    class: 'ba-highlight',
+    css: '.ba-highlight { background: linear-gradient(transparent 60%, #fff59d 60%); padding: 0 4px; font-weight: 600; display: inline; box-decoration-break: clone; -webkit-box-decoration-break: clone; }',
     enabled: true,
   },
+  // attention + box: ポイントボックス
   {
     id: 'ba-point',
     label: 'ポイント',
-    roles: ['attention', 'explain'],
-    css: '.ba-point { background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-point::before { content: "ポイント"; display: block; font-weight: 700; color: #1976d2; margin-bottom: 8px; font-size: 14px; }',
+    roles: ['attention'],
+    schema: 'box',
+    options: { title: { required: true, source: 'claude' } },
+    class: 'ba-point',
+    css: '.ba-point { background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-point .box-title { font-weight: 700; color: #1976d2; margin-bottom: 8px; font-size: 14px; }',
     enabled: true,
   },
+  // warning + box: 警告ボックス
   {
     id: 'ba-warning',
     label: '警告',
     roles: ['warning'],
-    css: '.ba-warning { background-color: #fff3e0; border-left: 4px solid #ff9800; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-warning::before { content: "注意"; display: block; font-weight: 700; color: #e65100; margin-bottom: 8px; font-size: 14px; }',
+    schema: 'box',
+    options: { title: { required: true, source: 'claude' } },
+    class: 'ba-warning',
+    css: '.ba-warning { background-color: #fff3e0; border-left: 4px solid #ff9800; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-warning .box-title { font-weight: 700; color: #e65100; margin-bottom: 8px; font-size: 14px; }',
     enabled: true,
   },
+  // explain + box: 補足説明ボックス
   {
-    id: 'ba-success',
-    label: '成功',
-    roles: ['action'],
-    css: '.ba-success { background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-success::before { content: "成功"; display: block; font-weight: 700; color: #2e7d32; margin-bottom: 8px; font-size: 14px; }',
-    enabled: true,
-  },
-  {
-    id: 'ba-quote',
-    label: '引用',
+    id: 'ba-explain',
+    label: '補足説明',
     roles: ['explain'],
-    css: '.ba-quote { background-color: #f5f5f5; border-left: 4px solid #9e9e9e; padding: 16px 20px; margin: 24px 0; font-style: italic; color: #616161; border-radius: 0 8px 8px 0; }',
+    schema: 'box',
+    options: { title: { required: false, source: 'claude' } },
+    class: 'ba-explain',
+    css: '.ba-explain { background-color: #f5f5f5; border-left: 4px solid #9e9e9e; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-explain .box-title { font-weight: 700; color: #616161; margin-bottom: 8px; font-size: 14px; }',
     enabled: true,
   },
+  // summarize + box: まとめボックス
   {
-    id: 'ba-summary',
-    label: 'まとめ',
+    id: 'ba-summary-box',
+    label: 'まとめボックス',
     roles: ['summarize'],
-    css: '.ba-summary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 24px; margin: 24px 0; border-radius: 12px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.25); } .ba-summary::before { content: "まとめ"; display: block; font-weight: 700; margin-bottom: 12px; font-size: 16px; }',
+    schema: 'box',
+    options: { title: { required: true, source: 'claude' } },
+    class: 'ba-summary-box',
+    css: '.ba-summary-box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 24px; margin: 24px 0; border-radius: 12px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.25); } .ba-summary-box .box-title { font-weight: 700; margin-bottom: 12px; font-size: 16px; }',
     enabled: true,
   },
+  // summarize + list: まとめリスト
   {
-    id: 'ba-checklist',
-    label: 'チェックリスト',
-    roles: ['summarize', 'action'],
-    css: '.ba-checklist { background-color: #fafafa; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; }',
+    id: 'ba-summary-list',
+    label: 'まとめリスト',
+    roles: ['summarize'],
+    schema: 'list',
+    options: { ordered: false },
+    class: 'ba-summary-list',
+    css: '.ba-summary-list { background-color: #fafafa; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; } .ba-summary-list .box-title { font-weight: 700; color: #333; margin-bottom: 8px; font-size: 14px; } .ba-summary-list ul { margin: 0; padding-left: 20px; } .ba-summary-list li { margin-bottom: 4px; }',
     enabled: true,
   },
+  // explain + table: 比較テーブル
   {
-    id: 'ba-number-list',
-    label: '番号付きリスト',
-    roles: ['explain', 'action'],
-    css: '.ba-number-list { background-color: #fff; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; }',
+    id: 'ba-table',
+    label: '比較テーブル',
+    roles: ['explain'],
+    schema: 'table',
+    options: { headers: { required: true, source: 'claude' } },
+    class: 'ba-table',
+    css: '.ba-table { margin: 24px 0; overflow-x: auto; } .ba-table table { width: 100%; border-collapse: collapse; } .ba-table th, .ba-table td { border: 1px solid #e0e0e0; padding: 12px; text-align: left; } .ba-table th { background-color: #f5f5f5; font-weight: 700; }',
+    enabled: true,
+  },
+  // action + callout: CTAボタン
+  {
+    id: 'ba-callout',
+    label: 'アクションボタン',
+    roles: ['action'],
+    schema: 'callout',
+    options: { buttonText: { source: 'claude' } },
+    class: 'ba-callout',
+    css: '.ba-callout { background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 20px 24px; margin: 24px 0; border-radius: 0 8px 8px 0; text-align: center; } .ba-callout p { margin-bottom: 16px; font-size: 16px; } .ba-callout .callout-button { background-color: #4caf50; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; } .ba-callout .callout-button:hover { background-color: #43a047; }',
     enabled: true,
   },
 ];
@@ -154,9 +289,28 @@ const defaultSettings: UserSettings = {
   lastUpdated: null,
 };
 
-// 装飾設定が新スキーマかどうかを判定
+// 装飾設定が新スキーマ（schema付き）かどうかを判定
 export function isNewDecorationSchema(decorations: DecorationSettings): decorations is DecorationWithRoles[] {
-  return Array.isArray(decorations);
+  if (!Array.isArray(decorations) || decorations.length === 0) return false;
+  // schemaフィールドの存在で新スキーマを判定
+  return 'schema' in decorations[0] && 'options' in decorations[0];
+}
+
+// 旧スキーマ（schema無し）をマイグレーション
+export function migrateDecorations(decorations: DecorationSettings): DecorationWithRoles[] {
+  // 旧オブジェクト形式の場合はデフォルトを返す
+  if (!Array.isArray(decorations)) {
+    return DEFAULT_DECORATIONS;
+  }
+
+  // 配列だが新スキーマでない場合（schema/options無し）
+  if (decorations.length > 0 && !('schema' in decorations[0])) {
+    // 旧配列形式からマイグレーション（デフォルトに戻す）
+    return DEFAULT_DECORATIONS;
+  }
+
+  // 新スキーマの場合はそのまま返す
+  return decorations as DecorationWithRoles[];
 }
 
 // Storeの型
@@ -351,14 +505,10 @@ export const settingsApi = {
 
       // サーバーからのデータをマージ
       if (response) {
-        // 装飾設定の変換（旧スキーマの場合はデフォルトを使用）
-        let decorations: DecorationWithRoles[];
-        if (response.decorations && isNewDecorationSchema(response.decorations)) {
-          decorations = response.decorations;
-        } else {
-          // 旧スキーマまたはnullの場合はデフォルトを使用
-          decorations = DEFAULT_DECORATIONS;
-        }
+        // 装飾設定の変換（旧スキーマの場合はマイグレーション）
+        const decorations = response.decorations
+          ? migrateDecorations(response.decorations)
+          : DEFAULT_DECORATIONS;
 
         const newSettings: UserSettings = {
           articleStyle: response.articleStyle || store.settings.articleStyle,
@@ -408,3 +558,9 @@ export const settingsApi = {
     }
   },
 };
+
+// ============================================================
+// 手動保存機能（保存ボタンでサーバーへ同期）
+// ============================================================
+// 注意: 自動保存は廃止。ユーザーが明示的に保存ボタンを押すまでDBには保存されない
+// localStorageには即座に保存される（persistミドルウェア）

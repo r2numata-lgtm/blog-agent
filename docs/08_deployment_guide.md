@@ -10,6 +10,20 @@
 
 このドキュメントでは、ブログ生成エージェントのデプロイ手順を説明します。
 
+### ローカル開発環境（dev）
+開発時は以下の構成で実施すること：
+- **フロントエンド**: ローカル（`npm run dev` → http://localhost:5173/）
+- **バックエンド**: AWS dev環境（API Gateway + Lambda）
+- **認証**: AWS Cognito dev環境
+
+```bash
+# フロントエンド起動
+cd frontend
+npm run dev
+```
+
+環境変数は `.env.development` でAWS dev環境を参照するよう設定済み。
+
 ### デプロイ環境
 - **ステージング環境（staging）**: テスト用
 - **本番環境（production）**: 実ユーザー向け

@@ -408,7 +408,7 @@ Resources:
     Properties:
       FunctionName: !Sub 'blog-agent-manage-settings-${Environment}'
       Runtime: python3.11
-      Handler: app.lambda_handler
+      Handler: handler.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Timeout: 30
       MemorySize: 256
@@ -418,7 +418,7 @@ Resources:
           LOCAL_DEV: 'false'
       Code:
         ZipFile: |
-          def lambda_handler(event, context):
+          def handler(event, context):
               return {'statusCode': 200, 'body': 'Placeholder - deploy actual code'}
       Tags:
         - Key: Environment

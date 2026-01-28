@@ -46,6 +46,11 @@ export interface InternalLink {
 }
 
 /**
+ * 出力形式の型
+ */
+export type OutputFormat = 'wordpress' | 'markdown';
+
+/**
  * 記事生成リクエストの型
  */
 export interface GenerateArticleRequest {
@@ -57,6 +62,7 @@ export interface GenerateArticleRequest {
   wordCount?: number;
   articleType?: 'info' | 'howto' | 'review';
   internalLinks?: InternalLink[];
+  outputFormat?: OutputFormat;
 }
 
 /**
@@ -75,7 +81,8 @@ export interface StructureValidation {
 export interface GenerateArticleResponse {
   articleId: string;
   title: string;
-  markdown: string;
+  markdown: string;  // Markdown形式またはWordPress HTML形式のコンテンツ
+  outputFormat?: OutputFormat;
   metadata: {
     wordCount: number;
     readingTime: number;

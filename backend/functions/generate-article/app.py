@@ -83,56 +83,80 @@ def get_default_settings() -> Dict[str, Any]:
                 'id': 'ba-highlight',
                 'label': 'ハイライト',
                 'roles': ['attention'],
-                'css': '.ba-highlight { background: linear-gradient(transparent 60%, #fff59d 60%); padding: 0 4px; font-weight: 600; }',
+                'schema': 'paragraph',
+                'options': {},
+                'class': 'ba-highlight',
+                'css': '.ba-highlight { background: linear-gradient(transparent 60%, #fff59d 60%); padding: 0 4px; font-weight: 600; display: inline; box-decoration-break: clone; -webkit-box-decoration-break: clone; }',
                 'enabled': True
             },
             {
                 'id': 'ba-point',
                 'label': 'ポイント',
-                'roles': ['attention', 'explain'],
-                'css': '.ba-point { background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; }',
+                'roles': ['attention'],
+                'schema': 'box',
+                'options': {'title': {'required': True, 'source': 'claude'}},
+                'class': 'ba-point',
+                'css': '.ba-point { background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-point .box-title { font-weight: 700; color: #1976d2; margin-bottom: 8px; font-size: 14px; }',
                 'enabled': True
             },
             {
                 'id': 'ba-warning',
                 'label': '警告',
                 'roles': ['warning'],
-                'css': '.ba-warning { background-color: #fff3e0; border-left: 4px solid #ff9800; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; }',
+                'schema': 'box',
+                'options': {'title': {'required': True, 'source': 'claude'}},
+                'class': 'ba-warning',
+                'css': '.ba-warning { background-color: #fff3e0; border-left: 4px solid #ff9800; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-warning .box-title { font-weight: 700; color: #e65100; margin-bottom: 8px; font-size: 14px; }',
                 'enabled': True
             },
             {
-                'id': 'ba-success',
-                'label': '成功',
-                'roles': ['action'],
-                'css': '.ba-success { background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; }',
-                'enabled': True
-            },
-            {
-                'id': 'ba-quote',
-                'label': '引用',
+                'id': 'ba-explain',
+                'label': '補足説明',
                 'roles': ['explain'],
-                'css': '.ba-quote { background-color: #f5f5f5; border-left: 4px solid #9e9e9e; padding: 16px 20px; margin: 24px 0; font-style: italic; color: #616161; border-radius: 0 8px 8px 0; }',
+                'schema': 'box',
+                'options': {'title': {'required': False, 'source': 'claude'}},
+                'class': 'ba-explain',
+                'css': '.ba-explain { background-color: #f5f5f5; border-left: 4px solid #9e9e9e; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-explain .box-title { font-weight: 700; color: #616161; margin-bottom: 8px; font-size: 14px; }',
                 'enabled': True
             },
             {
-                'id': 'ba-summary',
-                'label': 'まとめ',
+                'id': 'ba-summary-box',
+                'label': 'まとめボックス',
                 'roles': ['summarize'],
-                'css': '.ba-summary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 24px; margin: 24px 0; border-radius: 12px; }',
+                'schema': 'box',
+                'options': {'title': {'required': True, 'source': 'claude'}},
+                'class': 'ba-summary-box',
+                'css': '.ba-summary-box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 24px; margin: 24px 0; border-radius: 12px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.25); } .ba-summary-box .box-title { font-weight: 700; margin-bottom: 12px; font-size: 16px; }',
                 'enabled': True
             },
             {
-                'id': 'ba-checklist',
-                'label': 'チェックリスト',
-                'roles': ['summarize', 'action'],
-                'css': '.ba-checklist { background-color: #fafafa; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; }',
+                'id': 'ba-summary-list',
+                'label': 'まとめリスト',
+                'roles': ['summarize'],
+                'schema': 'list',
+                'options': {'ordered': False},
+                'class': 'ba-summary-list',
+                'css': '.ba-summary-list { background-color: #fafafa; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; } .ba-summary-list .box-title { font-weight: 700; color: #333; margin-bottom: 8px; font-size: 14px; } .ba-summary-list ul { margin: 0; padding-left: 20px; } .ba-summary-list li { margin-bottom: 4px; }',
                 'enabled': True
             },
             {
-                'id': 'ba-number-list',
-                'label': '番号付きリスト',
-                'roles': ['explain', 'action'],
-                'css': '.ba-number-list { background-color: #fff; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; }',
+                'id': 'ba-table',
+                'label': '比較テーブル',
+                'roles': ['explain'],
+                'schema': 'table',
+                'options': {'headers': {'required': True, 'source': 'claude'}},
+                'class': 'ba-table',
+                'css': '.ba-table { margin: 24px 0; overflow-x: auto; } .ba-table table { width: 100%; border-collapse: collapse; } .ba-table th, .ba-table td { border: 1px solid #e0e0e0; padding: 12px; text-align: left; } .ba-table th { background-color: #f5f5f5; font-weight: 700; }',
+                'enabled': True
+            },
+            {
+                'id': 'ba-callout',
+                'label': 'アクションボタン',
+                'roles': ['action'],
+                'schema': 'callout',
+                'options': {'buttonText': {'source': 'claude'}},
+                'class': 'ba-callout',
+                'css': '.ba-callout { background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 20px 24px; margin: 24px 0; border-radius: 0 8px 8px 0; text-align: center; } .ba-callout p { margin-bottom: 16px; font-size: 16px; } .ba-callout .callout-button { background-color: #4caf50; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; } .ba-callout .callout-button:hover { background-color: #43a047; }',
                 'enabled': True
             }
         ],
@@ -145,59 +169,28 @@ def get_default_settings() -> Dict[str, Any]:
     }
 
 
-def map_roles_to_decorations(structure: Dict[str, Any], decorations: list) -> Dict[str, Any]:
+def validate_and_filter_decorations(structure: Dict[str, Any], decorations: list) -> Dict[str, Any]:
     """
-    Step 1の出力（roles付き構造）をStep 2用にマッピング
-    roleからdecorationIdを決定する
+    Claudeが直接指定したdecorationIdを検証し、無効な装飾を除去する
 
-    ルール:
-    - 同一decorationIdの連続使用禁止
-    - 同一roleは1記事最大3回まで
-    - 対応装飾がない場合は装飾なし
+    - 有効な装飾のみを通す（enabled=True）
+    - 存在しないdecorationIdは除去
     """
-    # 有効な装飾のrole→decorationIdマッピングを作成
-    role_to_decorations = {}
-    for dec in decorations:
-        if dec.get('enabled', True) and dec.get('roles'):
-            for role in dec['roles']:
-                if role not in role_to_decorations:
-                    role_to_decorations[role] = []
-                role_to_decorations[role].append(dec['id'])
-
-    # 使用カウンター
-    role_usage_count = {}
-    last_decoration_id = None
+    # 有効な装飾IDのセットを作成
+    enabled_decoration_ids = {
+        dec['id'] for dec in decorations
+        if dec.get('enabled', True)
+    }
 
     def process_block(block: Dict[str, Any]) -> Dict[str, Any]:
-        nonlocal last_decoration_id
+        decoration_id = block.get('decorationId')
 
-        roles = block.get('roles', [])
-        decoration_id = None
-
-        if roles:
-            for role in roles:
-                # roleの使用回数チェック（最大3回）
-                if role_usage_count.get(role, 0) >= 3:
-                    continue
-
-                candidates = role_to_decorations.get(role, [])
-                for candidate in candidates:
-                    # 連続使用禁止チェック
-                    if candidate != last_decoration_id:
-                        decoration_id = candidate
-                        role_usage_count[role] = role_usage_count.get(role, 0) + 1
-                        break
-
-                if decoration_id:
-                    break
-
-        if decoration_id:
-            last_decoration_id = decoration_id
-
-        # rolesを削除し、decorationIdを追加
-        new_block = {k: v for k, v in block.items() if k != 'roles'}
-        if decoration_id:
-            new_block['decorationId'] = decoration_id
+        # decorationIdが無効な場合は除去
+        if decoration_id and decoration_id not in enabled_decoration_ids:
+            log_warning(f'Invalid or disabled decorationId: {decoration_id}')
+            new_block = {k: v for k, v in block.items() if k not in ('decorationId', 'title')}
+        else:
+            new_block = dict(block)
 
         # 入れ子のblocksを処理
         if 'blocks' in new_block:
@@ -206,7 +199,7 @@ def map_roles_to_decorations(structure: Dict[str, Any], decorations: list) -> Di
         return new_block
 
     # 構造全体を処理
-    mapped_structure = {
+    validated_structure = {
         'title': structure.get('title', ''),
         'sections': []
     }
@@ -216,22 +209,22 @@ def map_roles_to_decorations(structure: Dict[str, Any], decorations: list) -> Di
             'heading': section.get('heading', ''),
             'blocks': [process_block(b) for b in section.get('blocks', [])]
         }
-        mapped_structure['sections'].append(new_section)
+        validated_structure['sections'].append(new_section)
 
     if 'meta' in structure:
-        mapped_structure['meta'] = structure['meta']
+        validated_structure['meta'] = structure['meta']
 
-    return mapped_structure
+    return validated_structure
 
 
-def structure_to_markdown(mapped_structure: Dict[str, Any], decorations: list) -> str:
+def structure_to_markdown(validated_structure: Dict[str, Any], decorations: list) -> str:
     """
     マッピング済み構造からMarkdownを生成
     decorationId → 装飾タグ変換
     """
     lines = []
 
-    for section in mapped_structure.get('sections', []):
+    for section in validated_structure.get('sections', []):
         # H2見出し
         lines.append(f"## {section.get('heading', '')}")
         lines.append('')
@@ -249,10 +242,13 @@ def block_to_markdown(block: Dict[str, Any], decorations: list, indent: int = 0)
     block_type = block.get('type', 'paragraph')
     content = block.get('content', '')
     decoration_id = block.get('decorationId')
+    title = block.get('title', '')  # boxスキーマ用のタイトル
 
     if block_type == 'paragraph':
         if decoration_id:
-            lines.append(f':::box id="{decoration_id}"')
+            # タイトルがある場合はtitle属性も追加
+            title_attr = f' title="{title}"' if title else ''
+            lines.append(f':::box id="{decoration_id}"{title_attr}')
             lines.append(content)
             lines.append(':::')
         else:
@@ -263,7 +259,8 @@ def block_to_markdown(block: Dict[str, Any], decorations: list, indent: int = 0)
         items = block.get('items', [])
 
         if decoration_id:
-            lines.append(f':::box id="{decoration_id}"')
+            title_attr = f' title="{title}"' if title else ''
+            lines.append(f':::box id="{decoration_id}"{title_attr}')
 
         for item in items:
             prefix = '- ' if list_type == 'unordered' else '1. '
@@ -281,6 +278,118 @@ def block_to_markdown(block: Dict[str, Any], decorations: list, indent: int = 0)
             lines.append('')
 
     return lines
+
+
+def structure_to_wordpress(validated_structure: Dict[str, Any], decorations: list) -> str:
+    """
+    マッピング済み構造からWordPress Gutenbergブロック形式を生成
+    decorationId → 装飾divタグ変換
+    """
+    blocks = []
+
+    for section in validated_structure.get('sections', []):
+        # H2見出し
+        heading = section.get('heading', '')
+        blocks.append(f'<!-- wp:heading -->\n<h2 class="wp-block-heading">{html_escape(heading)}</h2>\n<!-- /wp:heading -->')
+
+        for block in section.get('blocks', []):
+            blocks.extend(block_to_wordpress(block, decorations))
+
+    return '\n\n'.join(blocks)
+
+
+def html_escape(text: str) -> str:
+    """HTMLエスケープ"""
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+
+
+def block_to_wordpress(block: Dict[str, Any], decorations: list) -> list:
+    """ブロックをWordPress Gutenbergブロック形式に変換"""
+    blocks = []
+    block_type = block.get('type', 'paragraph')
+    content = block.get('content', '')
+    decoration_id = block.get('decorationId')
+    title = block.get('title', '')  # boxスキーマ用のタイトル
+
+    # 装飾情報を取得
+    decoration = None
+    if decoration_id:
+        decoration = next((d for d in decorations if d.get('id') == decoration_id), None)
+
+    if block_type == 'paragraph':
+        if decoration:
+            dec_class = decoration.get('class', decoration_id)
+            schema = decoration.get('schema', 'paragraph')
+
+            if schema == 'paragraph':
+                # インライン装飾（paragraph schema）→ 段落内にspan
+                blocks.append(
+                    f'<!-- wp:paragraph -->\n'
+                    f'<p><span class="{dec_class}">{html_escape(content)}</span></p>\n'
+                    f'<!-- /wp:paragraph -->'
+                )
+            else:
+                # ボックス装飾（box等のschema）→ divで囲む、タイトルがあれば追加
+                title_html = f'<p class="box-title">{html_escape(title)}</p>\n' if title else ''
+                blocks.append(
+                    f'<!-- wp:html -->\n'
+                    f'<div class="{dec_class}">\n'
+                    f'{title_html}'
+                    f'<p>{html_escape(content)}</p>\n'
+                    f'</div>\n'
+                    f'<!-- /wp:html -->'
+                )
+        else:
+            # 通常の段落
+            blocks.append(f'<!-- wp:paragraph -->\n<p>{html_escape(content)}</p>\n<!-- /wp:paragraph -->')
+
+    elif block_type == 'list':
+        list_type = block.get('listType', 'unordered')
+        items = block.get('items', [])
+
+        if list_type == 'ordered':
+            tag = 'ol'
+            block_name = 'list'
+            attrs = ' {"ordered":true}'
+        else:
+            tag = 'ul'
+            block_name = 'list'
+            attrs = ''
+
+        items_html = '\n'.join(f'<li>{html_escape(item)}</li>' for item in items)
+
+        if decoration:
+            # 装飾付きリスト → カスタムHTMLブロック、タイトルがあれば追加
+            dec_class = decoration.get('class', decoration_id)
+            title_html = f'<p class="box-title">{html_escape(title)}</p>\n' if title else ''
+            blocks.append(
+                f'<!-- wp:html -->\n'
+                f'<div class="{dec_class}">\n'
+                f'{title_html}'
+                f'<{tag}>\n{items_html}\n</{tag}>\n'
+                f'</div>\n'
+                f'<!-- /wp:html -->'
+            )
+        else:
+            # 通常のリスト
+            blocks.append(
+                f'<!-- wp:{block_name}{attrs} -->\n'
+                f'<{tag} class="wp-block-list">\n{items_html}\n</{tag}>\n'
+                f'<!-- /wp:{block_name} -->'
+            )
+
+    elif block_type == 'subsection':
+        # H3見出し
+        heading = block.get('heading', '')
+        blocks.append(
+            f'<!-- wp:heading {{"level":3}} -->\n'
+            f'<h3 class="wp-block-heading">{html_escape(heading)}</h3>\n'
+            f'<!-- /wp:heading -->'
+        )
+        for sub_block in block.get('blocks', []):
+            blocks.extend(block_to_wordpress(sub_block, decorations))
+
+    return blocks
 
 
 def get_user_settings(user_id: str) -> Optional[Dict[str, Any]]:
@@ -451,37 +560,48 @@ def process_sqs_message(event: Dict[str, Any], context: Any):
                      sections_count=len(structure.get('sections', [])))
 
             # ==========================================
-            # Role → DecorationId マッピング
+            # DecorationIdの検証とフィルタリング
             # ==========================================
-            mapped_structure = map_roles_to_decorations(structure, decorations)
+            validated_structure = validate_and_filter_decorations(structure, decorations)
 
-            log_info('Role mapping completed', job_id=job_id)
+            log_info('Decoration validation completed', job_id=job_id)
 
             # ==========================================
-            # Step 2: Markdown生成（プログラム側で変換）
+            # Step 2: 出力形式に応じたコンテンツ生成
             # ==========================================
             # Claude APIを再度呼ばず、プログラムで変換する
-            markdown_content = structure_to_markdown(mapped_structure, decorations)
+            output_format = body.get('outputFormat', 'wordpress')
+
+            if output_format == 'wordpress':
+                content = structure_to_wordpress(validated_structure, decorations)
+                log_info('WordPress HTML generated', job_id=job_id)
+            else:
+                content = structure_to_markdown(validated_structure, decorations)
+                log_info('Markdown generated', job_id=job_id)
 
             generation_time = (datetime.now() - start_time).total_seconds()
 
-            # 生成結果の検証
-            structure_validation = validate_markdown_structure(markdown_content)
-            if not structure_validation['valid']:
-                log_warning('Generated article has structure issues', issues=structure_validation['issues'])
+            # 生成結果の検証（Markdownの場合のみ）
+            if output_format == 'markdown':
+                structure_validation = validate_markdown_structure(content)
+                if not structure_validation['valid']:
+                    log_warning('Generated article has structure issues', issues=structure_validation['issues'])
+            else:
+                structure_validation = {'valid': True, 'issues': [], 'headingCount': 0, 'h2Count': 0}
 
             # 記事ID生成
             article_id = generate_article_id()
             current_time = get_current_timestamp()
-            word_count = count_characters(markdown_content)
-            reading_time = estimate_reading_time(markdown_content)
+            word_count = count_characters(content)
+            reading_time = estimate_reading_time(content)
 
             # DynamoDBに記事を保存
             article = {
                 'userId': user_id,
                 'articleId': article_id,
                 'title': body['title'],
-                'markdown': markdown_content,
+                'markdown': content,  # WordPress HTMLまたはMarkdown
+                'outputFormat': output_format,
                 'status': 'draft',
                 'createdAt': current_time,
                 'updatedAt': current_time,
@@ -492,6 +612,7 @@ def process_sqs_message(event: Dict[str, Any], context: Any):
                     'purpose': body.get('purpose', ''),
                     'keywords': body.get('keywords', []),
                     'articleType': body.get('articleType', 'info'),
+                    'outputFormat': output_format,
                     'generationTime': Decimal(str(round(generation_time, 2))),
                     'structureValidation': structure_validation,
                     'generationMethod': 'two-step',
@@ -509,7 +630,8 @@ def process_sqs_message(event: Dict[str, Any], context: Any):
             result = {
                 'articleId': article_id,
                 'title': body['title'],
-                'markdown': markdown_content,
+                'markdown': content,  # WordPress HTMLまたはMarkdown
+                'outputFormat': output_format,
                 'metadata': {
                     'wordCount': word_count,
                     'readingTime': reading_time,

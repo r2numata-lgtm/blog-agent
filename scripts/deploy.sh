@@ -119,11 +119,15 @@ if [ "$SKIP_BACKEND" = false ]; then
       rm -rf /tmp/lambda_package_$func_name
       mkdir -p /tmp/lambda_package_$func_name
 
-      # 依存関係をインストール
+      # 依存関係をインストール（Lambda用にPython 3.11 Linuxバイナリ指定）
       if [ -f "$func_dir/requirements.txt" ]; then
-        pip install -r "$func_dir/requirements.txt" -t /tmp/lambda_package_$func_name/ -q 2>/dev/null || true
+        pip3 install -r "$func_dir/requirements.txt" -t /tmp/lambda_package_$func_name/ \
+          --platform manylinux2014_x86_64 --implementation cp --python-version 3.11 --only-binary=:all: -q 2>/dev/null || \
+        pip3 install -r "$func_dir/requirements.txt" -t /tmp/lambda_package_$func_name/ -q 2>/dev/null || true
       elif [ -f "requirements.txt" ]; then
-        pip install -r requirements.txt -t /tmp/lambda_package_$func_name/ -q 2>/dev/null || true
+        pip3 install -r requirements.txt -t /tmp/lambda_package_$func_name/ \
+          --platform manylinux2014_x86_64 --implementation cp --python-version 3.11 --only-binary=:all: -q 2>/dev/null || \
+        pip3 install -r requirements.txt -t /tmp/lambda_package_$func_name/ -q 2>/dev/null || true
       fi
 
       # ソースコードをコピー

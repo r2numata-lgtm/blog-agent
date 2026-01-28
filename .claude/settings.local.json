@@ -36,7 +36,17 @@
       "Bash(aws cloudfront:*)",
       "Bash(npx tsc:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(zip:*)",
+      "Bash(aws lambda update-function-code:*)",
+      "Bash(xxd:*)",
+      "Bash(find:*)",
+      "Bash(npm run dev:*)",
+      "Bash(tree:*)",
+      "Bash(aws dynamodb scan:*)",
+      "Bash(aws dynamodb get-item:*)",
+      "Bash(aws dynamodb describe-table:*)",
+      "Bash(npm run lint:*)"
     ]
   }
 }

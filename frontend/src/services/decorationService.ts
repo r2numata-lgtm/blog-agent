@@ -10,9 +10,27 @@ import {
   useSettingsStore,
   DEFAULT_DECORATIONS,
   isNewDecorationSchema,
+  migrateDecorations,
   type DecorationWithRoles,
-  type SemanticRole,
 } from '../stores/settingsStore';
+
+/**
+ * 装飾設定が新スキーマであることを保証する
+ * 旧スキーマの場合はマイグレーションを実行
+ */
+function ensureNewSchema(): DecorationWithRoles[] {
+  const store = useSettingsStore.getState();
+  const storeDecorations = store.settings.decorations;
+
+  if (isNewDecorationSchema(storeDecorations)) {
+    return storeDecorations;
+  }
+
+  // 旧スキーマの場合はマイグレーション
+  const migratedDecorations = migrateDecorations(storeDecorations);
+  store.updateDecorations(migratedDecorations);
+  return migratedDecorations;
+}
 
 /**
  * 装飾データの型（旧形式 - 後方互換性用）
@@ -46,8 +64,9 @@ function convertToLegacyDecoration(dec: DecorationWithRoles): Decoration {
   };
 }
 
-// 旧STORAGE_KEY（移行用に残す）
-const STORAGE_KEY = 'blog-agent-decorations';
+// 旧STORAGE_KEY（移行用に残す - 未使用だが後方互換性のため保持）
+const _STORAGE_KEY = 'blog-agent-decorations';
+void _STORAGE_KEY; // 未使用警告を抑制
 
 /**
  * 初期装飾設定を取得
@@ -63,20 +82,9 @@ function getInitialDecorations(): Decoration[] {
  */
 export function getDecorationSettings(): DecorationSettings {
   try {
-    // settingsStoreから設定を取得
-    const storeDecorations = useSettingsStore.getState().settings.decorations;
-
-    // 新形式（配列）の場合は変換
-    if (isNewDecorationSchema(storeDecorations)) {
-      return {
-        decorations: storeDecorations.map(convertToLegacyDecoration),
-        updatedAt: new Date().toISOString(),
-      };
-    }
-
-    // 旧形式または設定がない場合はデフォルトを使用
+    const storeDecorations = ensureNewSchema();
     return {
-      decorations: DEFAULT_DECORATIONS.map(convertToLegacyDecoration),
+      decorations: storeDecorations.map(convertToLegacyDecoration),
       updatedAt: new Date().toISOString(),
     };
   } catch (e) {
@@ -88,78 +96,24 @@ export function getDecorationSettings(): DecorationSettings {
   }
 }
 
-/**
- * 装飾設定を保存
- * settingsStoreに保存（API経由でサーバーに同期）
- */
-export function saveDecorationSettings(settings: DecorationSettings): void {
-  try {
-    // 旧形式を新形式に変換してstoreに保存
-    const newDecorations: DecorationWithRoles[] = settings.decorations.map((dec) => {
-      // 既存の新形式装飾からrolesを取得（なければデフォルト）
-      const existingDec = DEFAULT_DECORATIONS.find((d) => d.id === dec.id);
-      return {
-        id: dec.id,
-        label: dec.displayName,
-        roles: existingDec?.roles || [],
-        css: dec.customCSS || dec.defaultCSS,
-        enabled: dec.enabled,
-      };
-    });
-
-    useSettingsStore.getState().updateDecorations(newDecorations);
-  } catch (e) {
-    console.error('Failed to save decoration settings:', e);
-    throw new Error('装飾設定の保存に失敗しました');
-  }
-}
 
 /**
  * 単一の装飾を取得
  */
 export function getDecoration(id: string): Decoration | null {
-  const storeDecorations = useSettingsStore.getState().settings.decorations;
-
-  if (isNewDecorationSchema(storeDecorations)) {
-    const dec = storeDecorations.find((d) => d.id === id);
-    return dec ? convertToLegacyDecoration(dec) : null;
-  }
-
-  return null;
-}
-
-/**
- * 装飾を更新
- */
-export function updateDecoration(id: string, updates: Partial<Decoration>): Decoration | null {
-  const store = useSettingsStore.getState();
-  const storeDecorations = store.settings.decorations;
-
-  if (!isNewDecorationSchema(storeDecorations)) return null;
+  const storeDecorations = ensureNewSchema();
 
   const dec = storeDecorations.find((d) => d.id === id);
-  if (!dec) return null;
-
-  // 更新内容を新形式に変換
-  const newUpdates: Partial<DecorationWithRoles> = {};
-  if (updates.displayName !== undefined) newUpdates.label = updates.displayName;
-  if (updates.enabled !== undefined) newUpdates.enabled = updates.enabled;
-  if (updates.customCSS !== undefined) newUpdates.css = updates.customCSS || dec.css;
-
-  store.updateDecoration(id, newUpdates);
-
-  // 更新後のデータを返す
-  return getDecoration(id);
+  return dec ? convertToLegacyDecoration(dec) : null;
 }
+
 
 /**
  * 装飾の有効/無効を切り替え
  */
 export function toggleDecorationEnabled(id: string): Decoration | null {
   const store = useSettingsStore.getState();
-  const storeDecorations = store.settings.decorations;
-
-  if (!isNewDecorationSchema(storeDecorations)) return null;
+  const storeDecorations = ensureNewSchema();
 
   const dec = storeDecorations.find((d) => d.id === id);
   if (!dec) return null;
@@ -168,77 +122,42 @@ export function toggleDecorationEnabled(id: string): Decoration | null {
   return getDecoration(id);
 }
 
-/**
- * 装飾のカスタムCSSを保存
- */
-export function saveCustomCSS(id: string, css: string): Decoration | null {
-  const store = useSettingsStore.getState();
-  store.updateDecoration(id, { css });
-  return getDecoration(id);
-}
-
-/**
- * 装飾を標準に戻す
- */
-export function resetToDefault(id: string): Decoration | null {
-  const defaultDec = DEFAULT_DECORATIONS.find((d) => d.id === id);
-  if (!defaultDec) return null;
-
-  const store = useSettingsStore.getState();
-  store.updateDecoration(id, { css: defaultDec.css });
-  return getDecoration(id);
-}
 
 /**
  * 有効な装飾のCSSを取得（エクスポート用）
  */
 export function getEnabledDecorationCSS(): string {
-  const storeDecorations = useSettingsStore.getState().settings.decorations;
-
-  if (isNewDecorationSchema(storeDecorations)) {
-    return storeDecorations
-      .filter((d) => d.enabled)
-      .map((d) => d.css)
-      .join('\n\n');
-  }
-
-  return '';
+  const storeDecorations = ensureNewSchema();
+  return storeDecorations
+    .filter((d) => d.enabled)
+    .map((d) => d.css)
+    .join('\n\n');
 }
 
 /**
  * 有効な装飾のIDリストを取得
  */
 export function getEnabledDecorationIds(): string[] {
-  const storeDecorations = useSettingsStore.getState().settings.decorations;
-
-  if (isNewDecorationSchema(storeDecorations)) {
-    return storeDecorations.filter((d) => d.enabled).map((d) => d.id);
-  }
-
-  return [];
+  const storeDecorations = ensureNewSchema();
+  return storeDecorations.filter((d) => d.enabled).map((d) => d.id);
 }
 
 /**
  * 全装飾のCSSを取得（プレビュー用）
  */
 export function getAllDecorationCSS(): string {
-  const storeDecorations = useSettingsStore.getState().settings.decorations;
+  const storeDecorations = ensureNewSchema();
 
-  let decorationCSS = '';
-  let editorScopedCSS = '';
+  const decorationCSS = storeDecorations.map((d) => d.css).join('\n\n');
 
-  if (isNewDecorationSchema(storeDecorations)) {
-    decorationCSS = storeDecorations.map((d) => d.css).join('\n\n');
-
-    // ブロックエディタ内でも装飾が適用されるようにスコープを追加
-    editorScopedCSS = storeDecorations
-      .map((d) => {
-        const css = d.css;
-        // .ba-xxx を .ba-editor-area .ba-xxx に変換（エディタ内でも適用）
-        return css.replace(/\.ba-/g, '.ba-editor-area .ba-');
-      })
-      .join('\n\n');
-  }
+  // ブロックエディタ内でも装飾が適用されるようにスコープを追加
+  const editorScopedCSS = storeDecorations
+    .map((d) => {
+      const css = d.css;
+      // .ba-xxx を .ba-editor-area .ba-xxx に変換（エディタ内でも適用）
+      return css.replace(/\.ba-/g, '.ba-editor-area .ba-');
+    })
+    .join('\n\n');
 
   return `/* 装飾CSS */
 ${decorationCSS}
@@ -403,15 +322,12 @@ ${editorScopedCSS}
  * WordPress用の完全なCSSを生成
  */
 export function generateWordPressCSS(): string {
-  const storeDecorations = useSettingsStore.getState().settings.decorations;
+  const storeDecorations = ensureNewSchema();
 
-  let css = '';
-  if (isNewDecorationSchema(storeDecorations)) {
-    css = storeDecorations
-      .filter((d) => d.enabled)
-      .map((d) => d.css)
-      .join('\n\n');
-  }
+  const css = storeDecorations
+    .filter((d) => d.enabled)
+    .map((d) => d.css)
+    .join('\n\n');
 
   return `/* MyBlog AI 装飾CSS */
 /* WordPress管理画面 → 外観 → カスタマイズ → 追加CSS に貼り付けてください */
@@ -558,97 +474,11 @@ ${css}
 `;
 }
 
-/**
- * オリジナル装飾を追加
- * @param id - 装飾ID（ba-で始まる）
- * @param displayName - 表示名
- * @param css - CSS定義
- * @param roles - 意味的ロール（必須、1〜3個）
- */
-export function addCustomDecoration(
-  id: string,
-  displayName: string,
-  css: string,
-  roles: SemanticRole[] = []
-): Decoration | null {
-  // IDの検証（ba-で始まり、英数字とハイフンのみ）
-  if (!id.match(/^ba-[a-z0-9-]+$/)) {
-    throw new Error('IDは ba- で始まり、英小文字・数字・ハイフンのみ使用できます');
-  }
 
-  // rolesの検証（少なくとも1つ必要）
-  if (!roles || roles.length === 0) {
-    throw new Error('少なくとも1つの役割を選択してください');
-  }
-
-  if (roles.length > 3) {
-    throw new Error('役割は最大3つまで選択できます');
-  }
-
-  const store = useSettingsStore.getState();
-  const storeDecorations = store.settings.decorations;
-
-  if (!isNewDecorationSchema(storeDecorations)) {
-    throw new Error('設定の形式が不正です');
-  }
-
-  // 既存IDとの重複チェック
-  if (storeDecorations.some((d) => d.id === id)) {
-    throw new Error('このIDは既に使用されています');
-  }
-
-  const newDecoration: DecorationWithRoles = {
-    id,
-    label: displayName,
-    roles,
-    css,
-    enabled: true,
-  };
-
-  store.updateDecorations([...storeDecorations, newDecoration]);
-
-  return convertToLegacyDecoration(newDecoration);
-}
-
-/**
- * オリジナル装飾を削除（標準装飾は削除不可）
- */
-export function deleteCustomDecoration(id: string): boolean {
-  // 標準装飾は削除不可
-  if (DEFAULT_DECORATIONS.some((d) => d.id === id)) {
-    throw new Error('標準装飾は削除できません');
-  }
-
-  const store = useSettingsStore.getState();
-  const storeDecorations = store.settings.decorations;
-
-  if (!isNewDecorationSchema(storeDecorations)) return false;
-
-  const filteredDecorations = storeDecorations.filter((d) => d.id !== id);
-
-  if (filteredDecorations.length === storeDecorations.length) {
-    return false; // IDが見つからなかった
-  }
-
-  store.updateDecorations(filteredDecorations);
-  return true;
-}
-
-/**
- * 標準装飾かどうかを判定
- */
-export function isStandardDecoration(id: string): boolean {
-  // DEFAULT_DECORATIONSはsettingsStoreからインポート
-  return DEFAULT_DECORATIONS.some((d) => d.id === id);
-}
 
 /**
  * 新形式の装飾設定を直接取得（推奨）
  */
 export function getDecorationWithRoles(): DecorationWithRoles[] {
-  const storeDecorations = useSettingsStore.getState().settings.decorations;
-  if (isNewDecorationSchema(storeDecorations)) {
-    return storeDecorations;
-  }
-  return DEFAULT_DECORATIONS;
+  return ensureNewSchema();
 }

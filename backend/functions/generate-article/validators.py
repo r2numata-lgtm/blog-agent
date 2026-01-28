@@ -2,7 +2,24 @@
 入力検証モジュール
 """
 
+from decimal import Decimal
 from typing import Optional, Dict, Any, List
+
+
+def is_int_like(value) -> bool:
+    """intまたはDecimal（整数値）かどうかを判定"""
+    if isinstance(value, int):
+        return True
+    if isinstance(value, Decimal):
+        return value % 1 == 0
+    return False
+
+
+def to_int(value) -> int:
+    """int または Decimal を int に変換"""
+    if isinstance(value, Decimal):
+        return int(value)
+    return int(value)
 
 
 def validate_article_input(body: Dict[str, Any]) -> Optional[str]:
@@ -54,9 +71,10 @@ def validate_article_input(body: Dict[str, Any]) -> Optional[str]:
 
     # 文字数制限
     word_count = body.get('wordCount', 1500)
-    if not isinstance(word_count, int):
+    if not is_int_like(word_count):
         return '文字数は数値で指定してください'
 
+    word_count = to_int(word_count)
     if word_count < 500:
         return '文字数は500文字以上を指定してください'
 
@@ -145,12 +163,12 @@ def validate_settings(settings: Dict[str, Any]) -> Optional[str]:
     if seo:
         meta_length = seo.get('metaDescriptionLength')
         if meta_length is not None:
-            if not isinstance(meta_length, int) or meta_length < 50 or meta_length > 200:
+            if not is_int_like(meta_length) or to_int(meta_length) < 50 or to_int(meta_length) > 200:
                 return 'メタディスクリプション長は50〜200の整数で指定してください'
 
         max_keywords = seo.get('maxKeywords')
         if max_keywords is not None:
-            if not isinstance(max_keywords, int) or max_keywords < 1 or max_keywords > 20:
+            if not is_int_like(max_keywords) or to_int(max_keywords) < 1 or to_int(max_keywords) > 20:
                 return 'キーワード上限数は1〜20の整数で指定してください'
 
     # サンプル記事検証

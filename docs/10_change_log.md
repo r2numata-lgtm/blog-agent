@@ -1,12 +1,261 @@
 # 変更ログ
 
-**ドキュメントバージョン**: 3.0
-**最終更新日**: 2026-01-10
+**ドキュメントバージョン**: 3.3
+**最終更新日**: 2026-01-21
 **関連ドキュメント**: 全ドキュメント
 
 ---
 
 ## 📝 変更履歴
+
+### 2026-01-21: 装飾設定反映問題の修正・詳細設計書追加
+
+**変更内容**
+
+#### 概要
+ユーザーが設定した装飾CSSが記事生成に反映されない問題を修正。
+複数のバグを特定し、Lambda関数を修正してデプロイ。
+
+#### 修正内容
+
+**1. manage-settings Lambda (handler.py)**
+
+| 問題 | 原因 | 修正 |
+|-----|------|-----|
+| 設定が保存されない | HTTP API v2でのHTTPメソッド取得方法が違う | `event["requestContext"]["http"]["method"]` を使用 |
+| 保存後にエラー | Decimal型がJSONシリアライズできない | `decimal_default()` カスタムエンコーダー追加 |
+
+**2. generate-article Lambda (validators.py)**
+
+| 問題 | 原因 | 修正 |
+|-----|------|-----|
+| 設定バリデーション失敗 | Decimal型がintチェックに失敗 | `is_int_like()`, `to_int()` ヘルパー関数追加 |
+
+**3. generate-article Lambda (prompt_builder.py)**
+
+| 問題 | 原因 | 修正 |
+|-----|------|-----|
+| 無効な装飾が使われる | 全roleがプロンプトに含まれていた | 有効なroleのみをプロンプトに含める |
+
+**4. decorationService.ts (フロントエンド)**
+
+| 問題 | 原因 | 修正 |
+|-----|------|-----|
+| 装飾操作が動作しない | 旧スキーマのバリデーションが失敗 | `ensureNewSchema()` で自動マイグレーション |
+
+#### 新規ドキュメント
+
+- **12_detailed_flow_design.md**: 詳細処理フロー設計書
+  - システム全体フロー図
+  - 記事生成2段階フローの詳細
+  - 設定管理フロー
+  - 認証フロー（HTTP API v2対応）
+  - Lambda関数一覧
+  - トラブルシューティングガイド
+
+#### 開発環境の明確化
+
+- **08_deployment_guide.md** に開発環境方針を追加
+  - フロントエンド: ローカル（localhost:5173）
+  - バックエンド: AWS dev環境
+
+**影響範囲**
+- **frontend/src/services/decorationService.ts** - スキーマ自動マイグレーション
+- **backend/functions/manage-settings/handler.py** - HTTP API v2対応、Decimal対応
+- **backend/functions/generate-article/validators.py** - Decimal型バリデーション
+- **backend/functions/generate-article/prompt_builder.py** - 有効roleのみプロンプト含有
+- **docs/08_deployment_guide.md** - 開発環境方針追加
+- **docs/12_detailed_flow_design.md** - 新規作成
+
+---
+
+### 2026-01-20: Role/Schema/CSS完全分離アーキテクチャ実装
+
+**変更内容**
+
+#### 概要
+装飾の「意味（Role）」「構造（Schema）」「見た目（CSS）」を完全分離するアーキテクチャを実装。
+Claudeは「意味と文章」のみを生成し、構造とCSSはシステム側で決定する設計に変更。
+
+#### 新スキーマ仕様
+
+**Role（5種類固定）**
+| Role | 説明 |
+|------|------|
+| attention | 重要な主張・結論 |
+| warning | 注意・失敗・リスク |
+| summarize | 要点整理・まとめ |
+| explain | 解説・定義・補足 |
+| action | 行動促進・CTA |
+
+**Schema（6種類）**
+| Schema | 説明 | Options |
+|--------|------|---------|
+| paragraph | 通常段落/インライン | なし |
+| box | 囲みボックス | `title: {required, source}` |
+| list | 箇条書き | `ordered: boolean` |
+| steps | 手順・工程 | `stepTitle: {enabled, source}` |
+| table | 比較・整理表 | `headers: {required, source}` |
+| callout | CTA専用 | `buttonText: {source}` |
+
+**Role × Schema 制限マトリクス**
+```
+             paragraph  box  list  steps  table  callout
+attention        ✓       ✓    -      -      -       -
+warning          ✓       ✓    -      -      -       -
+summarize        ✓       ✓    ✓      -      -       -
+explain          ✓       ✓    -      -      ✓       -
+action           -       -    -      -      -       ✓
+```
+
+**新しい装飾定義スキーマ**
+```json
+{
+  "id": "ba-warning",
+  "label": "警告",
+  "roles": ["warning"],
+  "schema": "box",
+  "options": { "title": { "required": true, "source": "claude" } },
+  "class": "ba-warning",
+  "css": "...",
+  "enabled": true
+}
+```
+
+#### フロントエンド修正
+
+**settingsStore.ts**
+- 新型定義追加: `DecorationSchema`, `SchemaOptions`, `BoxOptions`, `ListOptions`等
+- `ROLE_SCHEMA_CONSTRAINTS`: Role × Schema制限マップ
+- `SCHEMA_LABELS`: Schema表示ラベル
+- `validateRoleSchemaConstraint()`: 制約検証関数
+- `getAvailableSchemasForRoles()`: 利用可能Schema取得関数
+- `getDefaultOptionsForSchema()`: Schemaデフォルトオプション
+- `DEFAULT_DECORATIONS`: 新スキーマ対応8種類のデフォルト装飾
+
+**ArticleSettingsPage.tsx**
+- Schema選択UI追加（Roleに応じて選択肢を制限）
+- Schema Options動的UI（schema別の設定項目）
+- Role変更時の自動Schema調整とワーニング表示
+- 装飾リストにschemaバッジ表示
+
+**decorationService.ts**
+- `addCustomDecoration()`: schema/options/class対応
+- `saveDecorationSettings()`: 新フィールド対応
+
+#### バックエンド修正
+
+**handler.py（manage-settings Lambda）**
+- `VALID_ROLES`, `VALID_SCHEMAS`, `ROLE_SCHEMA_CONSTRAINTS`定数追加
+- `validate_decoration()`: 単一装飾のバリデーション
+- `validate_decorations()`: リスト全体のバリデーション
+- `DEFAULT_SETTINGS`: 新スキーマ対応8種類のデフォルト装飾
+
+**prompt_builder.py**
+- `DecorationWithRoles`: schema/options追加
+- `DECORATION_SCHEMAS`, `ROLE_SCHEMA_CONSTRAINTS`定義
+- `get_decoration_metadata_for_prompt()`: meta要件情報取得
+- `build_structure_prompt()`: 新出力形式（type, text, roles, meta）
+- `build_output_prompt()`: 新シグネチャ（decorations引数）
+- `build_role_schema_to_decoration_map()`: (role, schema)→decorationIdマッピング
+- `_build_wordpress_output_prompt_v2()`: 新Gutenberg HTML出力プロンプト
+
+**app.py**
+- `get_default_settings()`: 新スキーマ対応
+- `process_wordpress_output()`: 新出力形式対応（table, callout追加）
+- `process_sqs_message()`: 新`build_output_prompt`シグネチャ対応
+
+#### 2段階記事生成フロー
+
+**Step 1: 構造生成**
+```json
+{
+  "title": "記事タイトル",
+  "sections": [
+    {
+      "heading": "見出し",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "本文テキスト",
+          "roles": ["warning"],
+          "meta": { "title": "注意点" }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Step 2: HTML変換**
+- role + type → decorationId解決
+- decoration.schemaに基づきHTML生成
+- meta情報（title, buttonText等）を反映
+
+#### 制約ルール
+- 同一decorationIdの連続使用は禁止
+- 同一roleは1記事最大3回まで
+- 対応装飾が存在しないroleは装飾しない
+- schema未対応metaは破棄
+
+**影響範囲**
+- **frontend/src/stores/settingsStore.ts** - 型定義・バリデーション
+- **frontend/src/pages/settings/ArticleSettingsPage.tsx** - 装飾編集UI
+- **frontend/src/services/decorationService.ts** - 装飾サービス
+- **backend/functions/manage-settings/handler.py** - 設定管理
+- **backend/functions/generate-article/prompt_builder.py** - プロンプト構築
+- **backend/functions/generate-article/app.py** - 記事生成
+
+---
+
+### 2026-01-19: 装飾role/CSS分離仕様実装（初期版）
+
+**変更内容**
+
+#### 概要
+ユーザー設定の装飾CSSが記事生成に反映されない問題を根本解決するため、装飾の「意味（role）」と「見た目（CSS）」を完全分離する仕様を実装。
+
+#### 設計原則
+1. **意味（role）と見た目（CSS）の完全分離**
+   - Claudeが扱うのは意味（role）のみ
+   - CSS / class名 / styleは人間（DB・アプリ側）の責務
+
+2. **固定roleセット**
+   - `attention`: 重要な主張・強調
+   - `warning`: 注意・失敗・リスク
+   - `summarize`: 要点整理・まとめ
+   - `explain`: 解説・定義
+   - `action`: 行動促進
+
+3. **2段階記事生成フロー**
+   - Step 1: 構造生成（Claude API 1回目）- roles付きJSON出力
+   - Step 2: 出力生成（Claude API 2回目）- WordPress/Markdown選択式
+
+#### バックエンド修正
+- `app.py`:
+  - `build_role_to_decoration_map()`: role→decorationIdマッピング生成
+  - `process_wordpress_output()`: WordPress JSONブロック→HTML変換
+  - `extract_markdown_content()`: Markdown出力抽出
+  - Step 2でClaude API呼び出しに変更（従来はプログラム変換）
+
+- `prompt_builder.py`:
+  - `build_output_prompt()`: 全面改修
+  - `_build_wordpress_output_prompt()`: WordPress用プロンプト
+  - `_build_markdown_output_prompt()`: Markdown用プロンプト
+
+#### 制約ルール
+- 同一decorationIdの連続使用は禁止
+- 同一roleは1記事最大3回まで
+- 対応装飾が存在しないroleは装飾しない
+
+**影響範囲**
+- **06_backend_design.md** - v2.0に更新、2段階生成フロー追加
+- **99_task_management.md** - 装飾role/CSS分離セクション追加
+
+**関連Issue**
+- ユーザー設定の装飾CSSが反映されない問題の根本解決
+
+---
 
 ### 2026-01-10: Phase 6 Week 18-19完了 - UI/UX改善・本番環境構築
 

@@ -6,16 +6,39 @@
 import os
 import json
 import time
+from decimal import Decimal
 from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
 
+def decimal_default(obj):
+    """JSON encoder for Decimal types"""
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
 # 環境変数
-USERS_TABLE = os.environ.get("USERS_TABLE", "blog-agent-users")
+# DYNAMODB_TABLE_SETTINGS または USERS_TABLE（後方互換）
+USERS_TABLE = os.environ.get("DYNAMODB_TABLE_SETTINGS") or os.environ.get("USERS_TABLE", "blog-agent-settings")
 REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
 
+# 有効なRole/Schema定義
+VALID_ROLES = {"attention", "warning", "summarize", "explain", "action"}
+VALID_SCHEMAS = {"paragraph", "box", "list", "steps", "table", "callout"}
+
+# Role × Schema 制限マップ
+ROLE_SCHEMA_CONSTRAINTS = {
+    "attention": {"paragraph", "box"},
+    "warning": {"paragraph", "box"},
+    "summarize": {"paragraph", "box", "list"},
+    "explain": {"paragraph", "box", "table"},
+    "action": {"callout"},
+}
+
 # デフォルト設定（decorationService.ts / settingsStore.ts と同期）
+# 新スキーマ: roles + schema + options + class
 DEFAULT_SETTINGS = {
     "articleStyle": {
         "taste": "friendly",
@@ -25,62 +48,94 @@ DEFAULT_SETTINGS = {
         "introStyle": "problem"
     },
     "decorations": [
+        # attention + paragraph: インラインハイライト
         {
             "id": "ba-highlight",
             "label": "ハイライト",
             "roles": ["attention"],
-            "css": ".ba-highlight { background: linear-gradient(transparent 60%, #fff59d 60%); padding: 0 4px; font-weight: 600; }",
+            "schema": "paragraph",
+            "options": {},
+            "class": "ba-highlight",
+            "css": ".ba-highlight { background: linear-gradient(transparent 60%, #fff59d 60%); padding: 0 4px; font-weight: 600; display: inline; box-decoration-break: clone; -webkit-box-decoration-break: clone; }",
             "enabled": True
         },
+        # attention + box: ポイントボックス
         {
             "id": "ba-point",
             "label": "ポイント",
-            "roles": ["attention", "explain"],
-            "css": ".ba-point { background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-point::before { content: \"💡 ポイント\"; display: block; font-weight: 700; color: #1976d2; margin-bottom: 8px; font-size: 14px; }",
+            "roles": ["attention"],
+            "schema": "box",
+            "options": {"title": {"required": True, "source": "claude"}},
+            "class": "ba-point",
+            "css": ".ba-point { background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-point .box-title { font-weight: 700; color: #1976d2; margin-bottom: 8px; font-size: 14px; }",
             "enabled": True
         },
+        # warning + box: 警告ボックス
         {
             "id": "ba-warning",
             "label": "警告",
             "roles": ["warning"],
-            "css": ".ba-warning { background-color: #fff3e0; border-left: 4px solid #ff9800; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-warning::before { content: \"⚠️ 注意\"; display: block; font-weight: 700; color: #e65100; margin-bottom: 8px; font-size: 14px; }",
+            "schema": "box",
+            "options": {"title": {"required": True, "source": "claude"}},
+            "class": "ba-warning",
+            "css": ".ba-warning { background-color: #fff3e0; border-left: 4px solid #ff9800; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-warning .box-title { font-weight: 700; color: #e65100; margin-bottom: 8px; font-size: 14px; }",
             "enabled": True
         },
+        # explain + box: 補足説明ボックス
         {
-            "id": "ba-success",
-            "label": "成功",
-            "roles": ["action"],
-            "css": ".ba-success { background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-success::before { content: \"✅ 成功\"; display: block; font-weight: 700; color: #2e7d32; margin-bottom: 8px; font-size: 14px; }",
-            "enabled": True
-        },
-        {
-            "id": "ba-quote",
-            "label": "引用",
+            "id": "ba-explain",
+            "label": "補足説明",
             "roles": ["explain"],
-            "css": ".ba-quote { background-color: #f5f5f5; border-left: 4px solid #9e9e9e; padding: 16px 20px; margin: 24px 0; font-style: italic; color: #616161; border-radius: 0 8px 8px 0; } .ba-quote::before { content: \"📝\"; margin-right: 8px; }",
+            "schema": "box",
+            "options": {"title": {"required": False, "source": "claude"}},
+            "class": "ba-explain",
+            "css": ".ba-explain { background-color: #f5f5f5; border-left: 4px solid #9e9e9e; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0; } .ba-explain .box-title { font-weight: 700; color: #616161; margin-bottom: 8px; font-size: 14px; }",
             "enabled": True
         },
+        # summarize + box: まとめボックス
         {
-            "id": "ba-summary",
-            "label": "まとめ",
+            "id": "ba-summary-box",
+            "label": "まとめボックス",
             "roles": ["summarize"],
-            "css": ".ba-summary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 24px; margin: 24px 0; border-radius: 12px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.25); } .ba-summary::before { content: \"📋 まとめ\"; display: block; font-weight: 700; margin-bottom: 12px; font-size: 16px; }",
+            "schema": "box",
+            "options": {"title": {"required": True, "source": "claude"}},
+            "class": "ba-summary-box",
+            "css": ".ba-summary-box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 24px; margin: 24px 0; border-radius: 12px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.25); } .ba-summary-box .box-title { font-weight: 700; margin-bottom: 12px; font-size: 16px; }",
             "enabled": True
         },
+        # summarize + list: まとめリスト
         {
-            "id": "ba-checklist",
-            "label": "チェックリスト",
-            "roles": ["summarize", "action"],
-            "css": ".ba-checklist { background-color: #fafafa; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; } .ba-checklist ul { list-style: none; padding: 0; margin: 0; } .ba-checklist li { padding: 8px 0; padding-left: 28px; position: relative; } .ba-checklist li::before { content: \"☑️\"; position: absolute; left: 0; }",
+            "id": "ba-summary-list",
+            "label": "まとめリスト",
+            "roles": ["summarize"],
+            "schema": "list",
+            "options": {"ordered": False},
+            "class": "ba-summary-list",
+            "css": ".ba-summary-list { background-color: #fafafa; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; } .ba-summary-list .box-title { font-weight: 700; color: #333; margin-bottom: 8px; font-size: 14px; } .ba-summary-list ul { margin: 0; padding-left: 20px; } .ba-summary-list li { margin-bottom: 4px; }",
             "enabled": True
         },
+        # explain + table: 比較テーブル
         {
-            "id": "ba-number-list",
-            "label": "番号付きリスト",
-            "roles": ["explain", "action"],
-            "css": ".ba-number-list { background-color: #fff; padding: 16px 20px; margin: 24px 0; border-radius: 8px; border: 1px solid #e0e0e0; counter-reset: number-list; } .ba-number-list ol { list-style: none; padding: 0; margin: 0; } .ba-number-list li { padding: 12px 0; padding-left: 40px; position: relative; border-bottom: 1px dashed #e0e0e0; counter-increment: number-list; } .ba-number-list li:last-child { border-bottom: none; } .ba-number-list li::before { content: counter(number-list); position: absolute; left: 0; width: 28px; height: 28px; background: #2196f3; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }",
+            "id": "ba-table",
+            "label": "比較テーブル",
+            "roles": ["explain"],
+            "schema": "table",
+            "options": {"headers": {"required": True, "source": "claude"}},
+            "class": "ba-table",
+            "css": ".ba-table { margin: 24px 0; overflow-x: auto; } .ba-table table { width: 100%; border-collapse: collapse; } .ba-table th, .ba-table td { border: 1px solid #e0e0e0; padding: 12px; text-align: left; } .ba-table th { background-color: #f5f5f5; font-weight: 700; }",
             "enabled": True
-        }
+        },
+        # action + callout: CTAボタン
+        {
+            "id": "ba-callout",
+            "label": "アクションボタン",
+            "roles": ["action"],
+            "schema": "callout",
+            "options": {"buttonText": {"source": "claude"}},
+            "class": "ba-callout",
+            "css": ".ba-callout { background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 20px 24px; margin: 24px 0; border-radius: 0 8px 8px 0; text-align: center; } .ba-callout p { margin-bottom: 16px; font-size: 16px; } .ba-callout .callout-button { background-color: #4caf50; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; } .ba-callout .callout-button:hover { background-color: #43a047; }",
+            "enabled": True
+        },
     ],
     "baseClass": "ba-article",
     "seo": {
@@ -89,6 +144,64 @@ DEFAULT_SETTINGS = {
     },
     "sampleArticles": []
 }
+
+
+def validate_decoration(decoration: dict) -> str | None:
+    """単一の装飾設定をバリデーション"""
+    # 必須フィールドチェック
+    required_fields = ["id", "label", "roles", "schema", "options", "class", "css", "enabled"]
+    for field in required_fields:
+        if field not in decoration:
+            return f"装飾設定に {field} が必要です"
+
+    # IDフォーマット
+    if not decoration["id"].startswith("ba-"):
+        return "IDは ba- で始まる必要があります"
+
+    # Rolesチェック
+    roles = decoration.get("roles", [])
+    if not roles or len(roles) == 0:
+        return "少なくとも1つの役割が必要です"
+    for role in roles:
+        if role not in VALID_ROLES:
+            return f"無効な役割: {role}"
+
+    # Schemaチェック
+    schema = decoration.get("schema")
+    if schema not in VALID_SCHEMAS:
+        return f"無効な構造タイプ: {schema}"
+
+    # Role × Schema 制約チェック
+    for role in roles:
+        if schema not in ROLE_SCHEMA_CONSTRAINTS.get(role, set()):
+            return f'役割 "{role}" は構造タイプ "{schema}" と組み合わせられません'
+
+    return None
+
+
+def validate_decorations(decorations: list) -> str | None:
+    """装飾設定リスト全体をバリデーション"""
+    if not isinstance(decorations, list):
+        return "装飾設定はリスト形式である必要があります"
+
+    ids = set()
+    for dec in decorations:
+        # 新スキーマかどうかチェック（schemaフィールドがあるか）
+        if "schema" not in dec:
+            # 旧スキーマは許容（マイグレーション対象）
+            continue
+
+        # 新スキーマの場合はバリデーション
+        error = validate_decoration(dec)
+        if error:
+            return error
+
+        # ID重複チェック
+        if dec["id"] in ids:
+            return f'装飾ID "{dec["id"]}" が重複しています'
+        ids.add(dec["id"])
+
+    return None
 
 # DynamoDBクライアント
 dynamodb = boto3.resource("dynamodb", region_name=REGION)
@@ -105,7 +218,7 @@ def create_response(status_code: int, body: dict) -> dict:
             "Access-Control-Allow-Headers": "Content-Type,Authorization",
             "Access-Control-Allow-Methods": "GET,PUT,OPTIONS",
         },
-        "body": json.dumps(body, ensure_ascii=False),
+        "body": json.dumps(body, ensure_ascii=False, default=decimal_default),
     }
 
 
@@ -113,6 +226,10 @@ def get_user_id_from_context(event: dict) -> str | None:
     """Lambda Authorizer contextからユーザーIDを取得"""
     request_context = event.get("requestContext", {})
     authorizer = request_context.get("authorizer", {})
+
+    # HTTP API v2では authorizer.lambda 配下にコンテキストがある
+    if "lambda" in authorizer:
+        authorizer = authorizer.get("lambda", {})
     return authorizer.get("userId")
 
 
@@ -219,7 +336,8 @@ def handler(event: dict[str, Any], context: Any) -> dict:
                 "error": {"code": "AUTH_001", "message": "認証が必要です"}
             })
 
-        http_method = event.get("httpMethod", "GET")
+        # HTTP API v2 と REST API v1 両方に対応
+        http_method = event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method", "GET")
 
         # GET: 設定取得
         if http_method == "GET":

@@ -2,6 +2,29 @@
 node_modules/
 venv/
 __pycache__/
+*.dist-info/
+*.egg-info/
+
+# Python packages installed in Lambda directories (use deploy script)
+backend/functions/**/boto3/
+backend/functions/**/botocore/
+backend/functions/**/anthropic/
+backend/functions/**/httpx/
+backend/functions/**/httpcore/
+backend/functions/**/anyio/
+backend/functions/**/sniffio/
+backend/functions/**/certifi/
+backend/functions/**/idna/
+backend/functions/**/h11/
+backend/functions/**/pydantic*/
+backend/functions/**/typing_*/
+backend/functions/**/annotated_types/
+backend/functions/**/jmespath/
+backend/functions/**/s3transfer/
+backend/functions/**/urllib3/
+backend/functions/**/dateutil/
+backend/functions/**/docstring_parser/
+backend/functions/**/bin/
 
 # Environment variables
 .env

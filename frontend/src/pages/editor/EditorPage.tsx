@@ -27,14 +27,24 @@ import { getAllDecorationCSS } from '../../services/decorationService';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BlockInstance = any;
 
-// ブロックの登録状態
-let blocksInitialized = false;
+// ブロックの登録状態（グローバルで管理してHMRでも重複登録を防ぐ）
+const BLOCKS_INITIALIZED_KEY = '__ba_blocks_initialized__';
 
 function initializeBlocks(): void {
-  if (blocksInitialized) return;
-  registerCoreBlocks();
-  registerCustomBlocks();
-  blocksInitialized = true;
+  // windowオブジェクトでグローバルに管理（HMR対応）
+  if ((window as unknown as Record<string, unknown>)[BLOCKS_INITIALIZED_KEY]) return;
+
+  try {
+    registerCoreBlocks();
+    registerCustomBlocks();
+    (window as unknown as Record<string, unknown>)[BLOCKS_INITIALIZED_KEY] = true;
+  } catch (e) {
+    // 既に登録済みの場合は警告を無視
+    if (!(e instanceof Error) || !e.message.includes('already registered')) {
+      console.error('Failed to initialize blocks:', e);
+    }
+    (window as unknown as Record<string, unknown>)[BLOCKS_INITIALIZED_KEY] = true;
+  }
 }
 
 // タブの型定義
@@ -404,7 +414,11 @@ const EditorPage: React.FC = () => {
               <div className="max-w-3xl mx-auto bg-white p-8 rounded-lg shadow">
                 <article className="ba-article">
                   <h1 className="text-3xl font-bold mb-6">{article.title}</h1>
-                  <div dangerouslySetInnerHTML={{ __html: serialize(blocks) }} />
+                  <div dangerouslySetInnerHTML={{
+                    __html: htmlContent
+                      .replace(/<!-- wp:[^>]+ -->/g, '')
+                      .replace(/<!-- \/wp:[^>]+ -->/g, '')
+                  }} />
                 </article>
               </div>
             </div>

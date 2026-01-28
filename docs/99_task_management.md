@@ -681,5 +681,52 @@
 
 ---
 
-**最終更新**: 2026-01-11
+**最終更新**: 2026-01-19
 **次回レビュー**: 本番デプロイ後
+
+---
+
+## 📋 仕様変更: 装飾role/CSS分離（2026-01-19）
+
+### 背景
+ユーザー設定の装飾CSSが記事生成に反映されない問題を根本解決するため、装飾の「意味（role）」と「見た目（CSS）」を完全分離する仕様に変更。
+
+### 変更概要
+
+| 項目 | 変更内容 |
+|------|----------|
+| 2段階生成 | Step 2をプログラム変換からClaude API呼び出しに変更 |
+| 出力形式 | wordpress/markdown 選択式に対応 |
+| role定義 | 5種の固定role（attention, warning, summarize, explain, action） |
+| 制約ルール | 同一decorationId連続禁止、同一role最大3回 |
+
+### タスク一覧
+
+| ID | タスク | ステータス | 完了日 |
+|----|--------|----------|--------|
+| RS-01 | Step 2をClaude API呼び出しに修正 | 🟢 | 2026-01-19 |
+| RS-02 | build_output_prompt関数修正 | 🟢 | 2026-01-19 |
+| RS-03 | WordPress出力プロンプト実装 | 🟢 | 2026-01-19 |
+| RS-04 | Markdown出力プロンプト実装 | 🟢 | 2026-01-19 |
+| RS-05 | role→decorationIdマッピング関数 | 🟢 | 2026-01-19 |
+| RS-06 | バックエンド後処理（class変換） | 🟢 | 2026-01-19 |
+| RS-07 | 設計書類更新 | 🟢 | 2026-01-19 |
+| RS-08 | 進捗管理資料更新 | 🟢 | 2026-01-19 |
+| RS-09 | Lambdaデプロイ | 🔴 | - |
+
+### 修正ファイル
+
+**バックエンド:**
+- `backend/functions/generate-article/app.py`
+  - `build_role_to_decoration_map()` 追加
+  - `process_wordpress_output()` 追加
+  - `extract_markdown_content()` 追加
+  - Step 2でClaude API呼び出し
+- `backend/functions/generate-article/prompt_builder.py`
+  - `build_output_prompt()` 全面改修
+  - `_build_wordpress_output_prompt()` 追加
+  - `_build_markdown_output_prompt()` 追加
+
+**ドキュメント:**
+- `docs/06_backend_design.md` - 2段階生成フロー追加
+- `docs/99_task_management.md` - 本セクション追加

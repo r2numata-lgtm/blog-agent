@@ -14,6 +14,7 @@ import {
 } from '../../services/articleApi';
 import { createArticle } from '../../services/articleStorage';
 import { markdownToBlocks, initializeBlocks } from '../../utils/markdownToBlocks';
+import { parse } from '@wordpress/blocks';
 import {
   getErrorMessage,
   isRetryableError,
@@ -196,6 +197,7 @@ const GeneratePage: React.FC = () => {
         wordCount,
         articleType,
         internalLinks: internalLinks.filter((link) => link.url && link.title),
+        outputFormat,
       };
 
       // 非同期ポーリングで記事生成（進捗コールバック付き）
@@ -222,7 +224,10 @@ const GeneratePage: React.FC = () => {
 
       // 生成された記事をlocalStorageに保存
       initializeBlocks();
-      const blocks = markdownToBlocks(response.markdown);
+      // 出力形式に応じてブロックを生成
+      const blocks = outputFormat === 'wordpress'
+        ? parse(response.markdown)  // WordPress: Gutenbergブロック形式をそのままパース
+        : markdownToBlocks(response.markdown);  // Markdown: 変換
       const savedArticle = createArticle(blocks, response.title, outputFormat);
 
       setCurrentStep('complete');

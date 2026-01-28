@@ -1,30 +1,26 @@
 import { useState, useRef, useEffect, type ChangeEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   useSettingsStore,
+  settingsApi,
   tasteLabels,
   firstPersonLabels,
   readerAddressLabels,
   toneLabels,
   introStyleLabels,
   SEMANTIC_ROLES,
+  SCHEMA_LABELS,
   type ArticleStyleSettings,
-  type SemanticRole,
 } from '../../stores/settingsStore';
 import {
   getDecorationSettings,
   toggleDecorationEnabled,
   generateWordPressCSS,
-  addCustomDecoration,
-  deleteCustomDecoration,
-  isStandardDecoration,
   getDecorationWithRoles,
   type Decoration,
 } from '../../services/decorationService';
 import type { DecorationWithRoles } from '../../stores/settingsStore';
 
 export const ArticleSettingsPage = () => {
-  const navigate = useNavigate();
   const {
     settings,
     isSaving,
@@ -41,11 +37,8 @@ export const ArticleSettingsPage = () => {
   const [decorations, setDecorations] = useState<Decoration[]>([]);
   const [decorationsWithRoles, setDecorationsWithRoles] = useState<DecorationWithRoles[]>([]);
   const [showCopied, setShowCopied] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newDecorationId, setNewDecorationId] = useState('');
-  const [newDecorationName, setNewDecorationName] = useState('');
-  const [newDecorationCSS, setNewDecorationCSS] = useState('');
-  const [newDecorationRoles, setNewDecorationRoles] = useState<SemanticRole[]>([]);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 装飾設定を読み込み
@@ -54,6 +47,28 @@ export const ArticleSettingsPage = () => {
     setDecorations(settings.decorations);
     setDecorationsWithRoles(getDecorationWithRoles());
   }, []);
+
+  // 設定変更を検知
+  useEffect(() => {
+    setHasChanges(true);
+  }, [settings.articleStyle, settings.seo, settings.sampleArticles, settings.decorations]);
+
+  // 保存処理
+  const handleSaveToServer = async () => {
+    try {
+      const success = await settingsApi.save();
+      if (success) {
+        setHasChanges(false);
+        setLastSavedAt(new Date().toISOString());
+        showSuccess('設定をサーバーに保存しました');
+      } else {
+        showError('設定の保存に失敗しました');
+      }
+    } catch (e) {
+      showError('設定の保存に失敗しました');
+      console.error('Failed to save settings:', e);
+    }
+  };
 
   const showSuccess = (message: string) => {
     setSuccessMessage(message);
@@ -130,67 +145,12 @@ export const ArticleSettingsPage = () => {
     }
   };
 
-  // 装飾エディタを開く
-  const handleEditDecoration = (id: string) => {
-    navigate(`/decoration-editor?id=${id}`);
-  };
-
   // WordPress CSSをコピー
   const handleCopyWordPressCSS = () => {
     const css = generateWordPressCSS();
     navigator.clipboard.writeText(css);
     setShowCopied(true);
     setTimeout(() => setShowCopied(false), 2000);
-  };
-
-  // オリジナル装飾を追加
-  const handleAddDecoration = () => {
-    // role選択チェック
-    if (newDecorationRoles.length === 0) {
-      showError('少なくとも1つの役割を選択してください');
-      return;
-    }
-
-    try {
-      const idWithPrefix = newDecorationId.startsWith('ba-') ? newDecorationId : `ba-${newDecorationId}`;
-      const css = newDecorationCSS || `.${idWithPrefix} {\n  /* スタイルを記述 */\n}`;
-
-      const added = addCustomDecoration(idWithPrefix, newDecorationName, css, newDecorationRoles);
-      if (added) {
-        setDecorations(prev => [...prev, added]);
-        setDecorationsWithRoles(getDecorationWithRoles());
-        setShowAddModal(false);
-        setNewDecorationId('');
-        setNewDecorationName('');
-        setNewDecorationCSS('');
-        setNewDecorationRoles([]);
-        showSuccess('オリジナル装飾を追加しました');
-      }
-    } catch (e) {
-      showError(e instanceof Error ? e.message : '装飾の追加に失敗しました');
-    }
-  };
-
-  // role選択のトグル
-  const handleToggleRole = (role: SemanticRole) => {
-    setNewDecorationRoles(prev =>
-      prev.includes(role)
-        ? prev.filter(r => r !== role)
-        : prev.length < 3 ? [...prev, role] : prev
-    );
-  };
-
-  // オリジナル装飾を削除
-  const handleDeleteDecoration = (id: string, name: string) => {
-    if (window.confirm(`「${name}」を削除しますか？`)) {
-      try {
-        deleteCustomDecoration(id);
-        setDecorations(prev => prev.filter(d => d.id !== id));
-        showSuccess('装飾を削除しました');
-      } catch (e) {
-        showError(e instanceof Error ? e.message : '装飾の削除に失敗しました');
-      }
-    }
   };
 
   return (
@@ -520,20 +480,9 @@ export const ArticleSettingsPage = () => {
         {/* 装飾CSS設定 */}
         {activeTab === 'decoration' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex justify-between items-start mb-4">
-              <p className="text-sm text-gray-600">
-                WordPress記事で使用する装飾CSSを管理します。各装飾をクリックしてCSSを編集できます。
-              </p>
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 flex items-center gap-1 whitespace-nowrap"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                オリジナル追加
-              </button>
-            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              記事生成で使用する装飾の有効/無効を切り替えます。
+            </p>
 
             <div className="space-y-2">
               {decorations.map((decoration) => {
@@ -544,35 +493,23 @@ export const ArticleSettingsPage = () => {
                 return (
                 <div
                   key={decoration.id}
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition"
+                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
                 >
-                  <div
-                    className="flex-1 cursor-pointer"
-                    onClick={() => handleEditDecoration(decoration.id)}
-                  >
+                  <div className="flex-1">
                     <div className="flex items-center gap-3">
                       <span className="font-medium text-gray-900">
                         {decoration.displayName}
                       </span>
-                      {isStandardDecoration(decoration.id) ? (
-                        <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
-                          標準
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">
-                          オリジナル
-                        </span>
-                      )}
-                      {decoration.isCustomized && isStandardDecoration(decoration.id) && (
-                        <span className="px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded">
-                          編集済み
-                        </span>
-                      )}
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
                       <p className="text-xs text-gray-500">
-                        クラス名: <code className="bg-gray-200 px-1 rounded">.{decoration.id}</code>
+                        クラス名: <code className="bg-gray-200 px-1 rounded">.{decorationWithRoles?.class || decoration.id}</code>
                       </p>
+                      {decorationWithRoles?.schema && (
+                        <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded">
+                          {SCHEMA_LABELS[decorationWithRoles.schema]?.label || decorationWithRoles.schema}
+                        </span>
+                      )}
                       {roles.length > 0 && (
                         <div className="flex gap-1">
                           {roles.map(role => (
@@ -586,182 +523,27 @@ export const ArticleSettingsPage = () => {
                           ))}
                         </div>
                       )}
-                      {roles.length === 0 && (
-                        <span className="text-xs text-red-500">
-                          ※役割未設定（記事生成で使用されません）
-                        </span>
-                      )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => handleEditDecoration(decoration.id)}
-                      className="px-3 py-1.5 text-sm text-blue-600 hover:text-blue-800"
-                    >
-                      編集
-                    </button>
-                    {!isStandardDecoration(decoration.id) && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDecoration(decoration.id, decoration.displayName);
-                        }}
-                        className="px-2 py-1.5 text-sm text-red-500 hover:text-red-700"
-                        title="削除"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    )}
+                  <div
+                    onClick={() => handleToggleDecoration(decoration.id)}
+                    className="cursor-pointer"
+                  >
                     <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleDecoration(decoration.id);
-                      }}
-                      className="cursor-pointer"
+                      className={`w-10 h-6 rounded-full transition ${
+                        decoration.enabled ? 'bg-blue-500' : 'bg-gray-300'
+                      }`}
                     >
                       <div
-                        className={`w-10 h-6 rounded-full transition ${
-                          decoration.enabled ? 'bg-blue-500' : 'bg-gray-300'
-                        }`}
-                      >
-                        <div
-                          className={`w-4 h-4 bg-white rounded-full shadow transform transition ${
-                            decoration.enabled ? 'translate-x-5' : 'translate-x-1'
-                          } mt-1`}
-                        />
-                      </div>
+                        className={`w-4 h-4 bg-white rounded-full shadow transform transition ${
+                          decoration.enabled ? 'translate-x-5' : 'translate-x-1'
+                        } mt-1`}
+                      />
                     </div>
                   </div>
                 </div>
                 );
               })}
-            </div>
-          </div>
-        )}
-
-        {/* オリジナル装飾追加モーダル */}
-        {showAddModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                オリジナル装飾を追加
-              </h3>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    表示名 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newDecorationName}
-                    onChange={(e) => setNewDecorationName(e.target.value)}
-                    placeholder="例: カスタムボックス"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    クラス名（ID） <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex items-center">
-                    <span className="px-3 py-2 bg-gray-100 border border-r-0 border-gray-300 rounded-l-lg text-gray-500 text-sm">
-                      ba-
-                    </span>
-                    <input
-                      type="text"
-                      value={newDecorationId.replace(/^ba-/, '')}
-                      onChange={(e) => setNewDecorationId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                      placeholder="custom-box"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-r-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    英小文字、数字、ハイフンのみ使用可能
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    CSS（任意）
-                  </label>
-                  <textarea
-                    value={newDecorationCSS}
-                    onChange={(e) => setNewDecorationCSS(e.target.value)}
-                    placeholder={`.ba-${newDecorationId || 'custom-box'} {\n  background-color: #f0f0f0;\n  padding: 16px;\n  border-radius: 8px;\n}`}
-                    rows={6}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    空欄の場合はテンプレートが作成されます
-                  </p>
-                </div>
-
-                {/* 役割（role）選択 - 必須 */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    この装飾の役割 <span className="text-red-500">*</span>
-                  </label>
-                  <p className="text-xs text-gray-500 mb-3">
-                    AIが使い分ける基準になります（1〜3個選択）
-                  </p>
-                  <div className="space-y-2">
-                    {(Object.entries(SEMANTIC_ROLES) as [SemanticRole, { label: string; description: string }][]).map(
-                      ([role, { label, description }]) => (
-                        <label
-                          key={role}
-                          className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition ${
-                            newDecorationRoles.includes(role)
-                              ? 'bg-blue-50 border-blue-300'
-                              : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={newDecorationRoles.includes(role)}
-                            onChange={() => handleToggleRole(role)}
-                            className="mt-0.5 h-4 w-4 text-blue-600 rounded border-gray-300"
-                          />
-                          <div>
-                            <span className="font-medium text-gray-900">{label}</span>
-                            <p className="text-xs text-gray-500">{description}</p>
-                          </div>
-                        </label>
-                      )
-                    )}
-                  </div>
-                  {newDecorationRoles.length === 0 && (
-                    <p className="text-xs text-red-500 mt-2">
-                      ※ 少なくとも1つの役割を選択してください
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex gap-3 justify-end mt-6">
-                <button
-                  onClick={() => {
-                    setShowAddModal(false);
-                    setNewDecorationId('');
-                    setNewDecorationName('');
-                    setNewDecorationCSS('');
-                    setNewDecorationRoles([]);
-                  }}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                >
-                  キャンセル
-                </button>
-                <button
-                  onClick={handleAddDecoration}
-                  disabled={!newDecorationName.trim() || !newDecorationId.trim() || newDecorationRoles.length === 0}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                >
-                  追加
-                </button>
-              </div>
             </div>
           </div>
         )}
@@ -888,15 +670,38 @@ export const ArticleSettingsPage = () => {
           </div>
         )}
 
-        {/* 保存状態表示 */}
-        <div className="mt-6 text-sm text-gray-500 text-center">
-          {isSaving ? (
-            '保存中...'
-          ) : settings.lastUpdated ? (
-            `最終更新: ${new Date(settings.lastUpdated).toLocaleString('ja-JP')}`
-          ) : (
-            '設定は自動的に保存されます'
-          )}
+        {/* 保存ボタンと状態表示 */}
+        <div className="mt-6 flex flex-col items-center gap-3">
+          <button
+            onClick={handleSaveToServer}
+            disabled={isSaving}
+            className={`px-6 py-2.5 rounded-lg font-medium text-white transition ${
+              isSaving
+                ? 'bg-gray-400 cursor-not-allowed'
+                : hasChanges
+                ? 'bg-blue-600 hover:bg-blue-700'
+                : 'bg-green-600 hover:bg-green-700'
+            }`}
+          >
+            {isSaving ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                保存中...
+              </span>
+            ) : hasChanges ? (
+              '設定を保存'
+            ) : (
+              '保存済み'
+            )}
+          </button>
+          <p className="text-sm text-gray-500">
+            {lastSavedAt
+              ? `最終保存: ${new Date(lastSavedAt).toLocaleString('ja-JP')}`
+              : '変更を保存するには「設定を保存」ボタンを押してください'}
+          </p>
         </div>
       </div>
     </div>

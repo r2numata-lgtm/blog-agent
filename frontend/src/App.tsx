@@ -9,7 +9,6 @@ import { ArticlesPage } from './pages/articles';
 import { HomePage } from './pages/home';
 import { UpgradePage } from './pages/upgrade';
 import { AccountSettingsPage } from './pages/account';
-import { DecorationEditorPage } from './pages/decoration';
 import { MainLayout } from './components/layout';
 import { ToastProvider } from './components/ui';
 
@@ -84,14 +83,6 @@ const AppRouter = () => {
         element={
           <ProtectedWithLayout>
             <UpgradePage />
-          </ProtectedWithLayout>
-        }
-      />
-      <Route
-        path="/decoration-editor"
-        element={
-          <ProtectedWithLayout>
-            <DecorationEditorPage />
           </ProtectedWithLayout>
         }
       />
