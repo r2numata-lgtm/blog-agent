@@ -39,7 +39,8 @@ export const ArticleSettingsPage = () => {
   const [showCopied, setShowCopied] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const wordpressFileInputRef = useRef<HTMLInputElement>(null);
+  const markdownFileInputRef = useRef<HTMLInputElement>(null);
 
   // 装飾設定を読み込み
   useEffect(() => {
@@ -82,7 +83,8 @@ export const ArticleSettingsPage = () => {
     setTimeout(() => setErrorMessage(''), 5000);
   };
 
-  const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+  // WordPress用アップロード処理
+  const handleWordPressUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -92,25 +94,30 @@ export const ArticleSettingsPage = () => {
     }
 
     const isHtml = file.name.endsWith('.html') || file.name.endsWith('.htm');
-    const isMarkdown = file.name.endsWith('.md') || file.name.endsWith('.markdown');
-
-    if (!isHtml && !isMarkdown) {
-      showError('HTML (.html, .htm) または Markdown (.md) ファイルのみアップロード可能です');
+    if (!isHtml) {
+      showError('WordPress用はHTMLファイル (.html, .htm) のみアップロード可能です');
       return;
     }
 
     try {
       const content = await file.text();
-      const title = file.name.replace(/\.(html?|md|markdown)$/i, '');
+
+      // WordPress Gutenbergブロック形式のチェック
+      if (!content.includes('<!-- wp:')) {
+        showError('WordPress Gutenbergブロック形式のHTMLファイルを指定してください');
+        return;
+      }
+
+      const title = file.name.replace(/\.(html?)$/i, '');
 
       const added = addSampleArticle({
         title,
         content,
-        format: isMarkdown ? 'markdown' : 'html',
+        format: 'wordpress',
       });
 
       if (added) {
-        showSuccess('サンプル記事を追加しました');
+        showSuccess('WordPress用サンプル記事を追加しました');
       } else {
         showError('サンプル記事は最大3件までです');
       }
@@ -118,8 +125,55 @@ export const ArticleSettingsPage = () => {
       showError('ファイルの読み込みに失敗しました');
     }
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    if (wordpressFileInputRef.current) {
+      wordpressFileInputRef.current.value = '';
+    }
+  };
+
+  // Markdown用アップロード処理
+  const handleMarkdownUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 100 * 1024) {
+      showError('ファイルサイズは100KB以下にしてください');
+      return;
+    }
+
+    const isMarkdown = file.name.endsWith('.md') || file.name.endsWith('.markdown');
+    if (!isMarkdown) {
+      showError('Markdown用は .md ファイルのみアップロード可能です');
+      return;
+    }
+
+    try {
+      const content = await file.text();
+
+      // Markdown形式のチェック（見出しがあるか）
+      if (!content.includes('#')) {
+        showError('Markdown形式のファイルを指定してください（見出し # が見つかりません）');
+        return;
+      }
+
+      const title = file.name.replace(/\.(md|markdown)$/i, '');
+
+      const added = addSampleArticle({
+        title,
+        content,
+        format: 'markdown',
+      });
+
+      if (added) {
+        showSuccess('Markdown用サンプル記事を追加しました');
+      } else {
+        showError('サンプル記事は最大3件までです');
+      }
+    } catch {
+      showError('ファイルの読み込みに失敗しました');
+    }
+
+    if (markdownFileInputRef.current) {
+      markdownFileInputRef.current.value = '';
     }
   };
 
@@ -373,51 +427,78 @@ export const ArticleSettingsPage = () => {
               最大3記事までアップロード可能です。
             </p>
 
-            <div className="mb-6">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".html,.htm,.md,.markdown"
-                onChange={handleFileUpload}
-                className="hidden"
-                id="sample-upload"
-              />
-              <label
-                htmlFor="sample-upload"
-                className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition ${
-                  settings.sampleArticles.length >= 3
-                    ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
-                    : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'
-                }`}
-              >
-                {settings.sampleArticles.length >= 3 ? (
-                  <p className="text-sm text-gray-400">
-                    サンプル記事の上限（3件）に達しました
-                  </p>
-                ) : (
-                  <>
-                    <svg
-                      className="w-8 h-8 text-gray-400 mb-2"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                      />
-                    </svg>
-                    <p className="text-sm text-gray-500">
-                      クリックまたはドラッグ&ドロップでアップロード
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      HTML (.html) または Markdown (.md) / 最大100KB
-                    </p>
-                  </>
-                )}
-              </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              {/* WordPress用アップロード */}
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                  <span className="px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded">WordPress</span>
+                  用サンプル
+                </h3>
+                <input
+                  ref={wordpressFileInputRef}
+                  type="file"
+                  accept=".html,.htm"
+                  onChange={handleWordPressUpload}
+                  className="hidden"
+                  id="wordpress-upload"
+                />
+                <label
+                  htmlFor="wordpress-upload"
+                  className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-lg cursor-pointer transition ${
+                    settings.sampleArticles.length >= 3
+                      ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                      : 'border-orange-200 hover:border-orange-400 hover:bg-orange-50'
+                  }`}
+                >
+                  {settings.sampleArticles.length >= 3 ? (
+                    <p className="text-xs text-gray-400">上限に達しました</p>
+                  ) : (
+                    <>
+                      <svg className="w-6 h-6 text-orange-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <p className="text-xs text-gray-500">HTMLファイル (.html)</p>
+                      <p className="text-xs text-gray-400">Gutenbergブロック形式</p>
+                    </>
+                  )}
+                </label>
+              </div>
+
+              {/* Markdown用アップロード */}
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                  <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">Markdown</span>
+                  用サンプル
+                </h3>
+                <input
+                  ref={markdownFileInputRef}
+                  type="file"
+                  accept=".md,.markdown"
+                  onChange={handleMarkdownUpload}
+                  className="hidden"
+                  id="markdown-upload"
+                />
+                <label
+                  htmlFor="markdown-upload"
+                  className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-lg cursor-pointer transition ${
+                    settings.sampleArticles.length >= 3
+                      ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                      : 'border-purple-200 hover:border-purple-400 hover:bg-purple-50'
+                  }`}
+                >
+                  {settings.sampleArticles.length >= 3 ? (
+                    <p className="text-xs text-gray-400">上限に達しました</p>
+                  ) : (
+                    <>
+                      <svg className="w-6 h-6 text-purple-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <p className="text-xs text-gray-500">Markdownファイル (.md)</p>
+                      <p className="text-xs text-gray-400">純粋なMarkdown形式</p>
+                    </>
+                  )}
+                </label>
+              </div>
             </div>
 
             {settings.sampleArticles.length > 0 ? (
@@ -433,12 +514,12 @@ export const ArticleSettingsPage = () => {
                     <div className="flex items-center gap-3">
                       <span
                         className={`px-2 py-1 text-xs rounded ${
-                          article.format === 'html'
+                          article.format === 'wordpress'
                             ? 'bg-orange-100 text-orange-700'
                             : 'bg-purple-100 text-purple-700'
                         }`}
                       >
-                        {article.format.toUpperCase()}
+                        {article.format === 'wordpress' ? 'WordPress' : 'Markdown'}
                       </span>
                       <div>
                         <p className="text-sm font-medium text-gray-900">{article.title}</p>

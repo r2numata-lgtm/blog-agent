@@ -20,7 +20,8 @@ from prompt_builder import (
     build_title_generation_prompt,
     build_meta_generation_prompt,
     build_structure_prompt,
-    build_output_prompt
+    build_output_prompt,
+    build_markdown_prompt
 )
 from utils import (
     generate_article_id,
@@ -219,8 +220,8 @@ def validate_and_filter_decorations(structure: Dict[str, Any], decorations: list
 
 def structure_to_markdown(validated_structure: Dict[str, Any], decorations: list) -> str:
     """
-    マッピング済み構造からMarkdownを生成
-    decorationId → 装飾タグ変換
+    マッピング済み構造から純粋なMarkdownを生成
+    装飾は無視し、通常のMarkdown記法のみを使用
     """
     lines = []
 
@@ -230,14 +231,14 @@ def structure_to_markdown(validated_structure: Dict[str, Any], decorations: list
         lines.append('')
 
         for block in section.get('blocks', []):
-            lines.extend(block_to_markdown(block, decorations))
+            lines.extend(block_to_markdown_plain(block))
             lines.append('')
 
     return '\n'.join(lines)
 
 
 def block_to_markdown(block: Dict[str, Any], decorations: list, indent: int = 0) -> list:
-    """ブロックをMarkdown行に変換"""
+    """ブロックをMarkdown行に変換（WordPress用装飾タグ付き）"""
     lines = []
     block_type = block.get('type', 'paragraph')
     content = block.get('content', '')
@@ -275,6 +276,50 @@ def block_to_markdown(block: Dict[str, Any], decorations: list, indent: int = 0)
         lines.append('')
         for sub_block in block.get('blocks', []):
             lines.extend(block_to_markdown(sub_block, decorations))
+            lines.append('')
+
+    return lines
+
+
+def block_to_markdown_plain(block: Dict[str, Any]) -> list:
+    """ブロックを純粋なMarkdown行に変換（装飾は無視）"""
+    lines = []
+    block_type = block.get('type', 'paragraph')
+    content = block.get('content', '')
+    title = block.get('title', '')
+    decoration_id = block.get('decorationId')
+
+    if block_type == 'paragraph':
+        # boxスキーマの装飾がある場合は引用ブロックとして表現
+        if decoration_id and title:
+            lines.append(f'> **{title}**')
+            lines.append(f'> ')
+            lines.append(f'> {content}')
+        else:
+            # 通常の段落（ハイライトも含む）
+            lines.append(content)
+
+    elif block_type == 'list':
+        list_type = block.get('listType', 'unordered')
+        items = block.get('items', [])
+
+        # タイトルがある場合は太字で表示
+        if title:
+            lines.append(f'**{title}**')
+            lines.append('')
+
+        for i, item in enumerate(items):
+            if list_type == 'unordered':
+                lines.append(f'- {item}')
+            else:
+                lines.append(f'{i + 1}. {item}')
+
+    elif block_type == 'subsection':
+        # H3見出し
+        lines.append(f"### {block.get('heading', '')}")
+        lines.append('')
+        for sub_block in block.get('blocks', []):
+            lines.extend(block_to_markdown_plain(sub_block))
             lines.append('')
 
     return lines
@@ -495,7 +540,7 @@ def submit_article_job(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def process_sqs_message(event: Dict[str, Any], context: Any):
-    """SQSメッセージを処理して記事を生成（2段階生成）"""
+    """SQSメッセージを処理して記事を生成"""
     import re
 
     for record in event.get('Records', []):
@@ -505,7 +550,13 @@ def process_sqs_message(event: Dict[str, Any], context: Any):
             user_id = message['userId']
             body = message['body']
 
-            log_info('Processing SQS message (two-step generation)', job_id=job_id, user_id=user_id)
+            # 出力形式を最初に取得
+            output_format = body.get('outputFormat', 'wordpress')
+
+            log_info('Processing SQS message',
+                     job_id=job_id,
+                     user_id=user_id,
+                     output_format=output_format)
 
             # ステータスを処理中に更新
             update_job_status(job_id, 'processing')
@@ -528,74 +579,113 @@ def process_sqs_message(event: Dict[str, Any], context: Any):
                 user_settings['sampleArticles'] = [sample_wp, sample_md]
                 log_info('Using default sample articles', job_id=job_id)
 
-            # 装飾設定を取得（新スキーマ：list形式）
-            decorations = user_settings.get('decorations', [])
-            if not isinstance(decorations, list):
-                # 旧スキーマの場合はデフォルトを使用
-                decorations = get_default_settings()['decorations']
-
             start_time = datetime.now()
             claude_client = get_claude_client()
 
             # ==========================================
-            # Step 1: 構造生成（roleのみ、CSSなし）
+            # 出力形式によってフローを完全に分岐
             # ==========================================
-            structure_prompt = build_structure_prompt(body, user_settings)
-
-            log_info('Step 1: Structure generation',
-                     job_id=job_id,
-                     prompt_length=len(structure_prompt))
-
-            structure_response = claude_client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=6000,
-                temperature=0.7,
-                messages=[{"role": "user", "content": structure_prompt}]
-            )
-
-            structure_text = structure_response.content[0].text
-
-            # JSONをパース
-            json_match = re.search(r'```json\s*(\{.*?\})\s*```', structure_text, re.DOTALL)
-            if json_match:
-                structure = json.loads(json_match.group(1))
-            else:
-                # JSONブロックがない場合は直接パース
-                structure = json.loads(structure_text)
-
-            log_info('Step 1 completed: Structure parsed',
-                     job_id=job_id,
-                     sections_count=len(structure.get('sections', [])))
-
-            # ==========================================
-            # DecorationIdの検証とフィルタリング
-            # ==========================================
-            validated_structure = validate_and_filter_decorations(structure, decorations)
-
-            log_info('Decoration validation completed', job_id=job_id)
-
-            # ==========================================
-            # Step 2: 出力形式に応じたコンテンツ生成
-            # ==========================================
-            # Claude APIを再度呼ばず、プログラムで変換する
-            output_format = body.get('outputFormat', 'wordpress')
-
-            if output_format == 'wordpress':
-                content = structure_to_wordpress(validated_structure, decorations)
-                log_info('WordPress HTML generated', job_id=job_id)
-            else:
-                content = structure_to_markdown(validated_structure, decorations)
-                log_info('Markdown generated', job_id=job_id)
-
-            generation_time = (datetime.now() - start_time).total_seconds()
-
-            # 生成結果の検証（Markdownの場合のみ）
             if output_format == 'markdown':
+                # ==========================================
+                # Markdown: Claudeが直接Markdownを生成
+                # ==========================================
+                markdown_prompt = build_markdown_prompt(body, user_settings)
+
+                log_info('Markdown direct generation',
+                         job_id=job_id,
+                         prompt_length=len(markdown_prompt))
+
+                markdown_response = claude_client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=20000,
+                    temperature=0.7,
+                    messages=[{"role": "user", "content": markdown_prompt}]
+                )
+
+                content = markdown_response.content[0].text
+
+                # コードブロックで囲まれている場合は除去
+                if content.startswith('```markdown'):
+                    content = re.sub(r'^```markdown\s*', '', content)
+                    content = re.sub(r'\s*```$', '', content)
+                elif content.startswith('```'):
+                    content = re.sub(r'^```\s*', '', content)
+                    content = re.sub(r'\s*```$', '', content)
+
+                log_info('Markdown generated directly',
+                         job_id=job_id,
+                         input_tokens=markdown_response.usage.input_tokens,
+                         output_tokens=markdown_response.usage.output_tokens)
+
+                generation_time = (datetime.now() - start_time).total_seconds()
+
+                # 生成結果の検証
                 structure_validation = validate_markdown_structure(content)
                 if not structure_validation['valid']:
                     log_warning('Generated article has structure issues', issues=structure_validation['issues'])
+
+                # メタデータ（Markdown用）
+                prompt_metadata = {
+                    'model': CLAUDE_MODEL,
+                    'temperature': Decimal('0.7'),
+                    'inputTokens': markdown_response.usage.input_tokens,
+                    'outputTokens': markdown_response.usage.output_tokens
+                }
+
             else:
+                # ==========================================
+                # WordPress: 2段階生成（JSON構造 → HTML変換）
+                # ==========================================
+                # 装飾設定を取得（新スキーマ：list形式）
+                decorations = user_settings.get('decorations', [])
+                if not isinstance(decorations, list):
+                    decorations = get_default_settings()['decorations']
+
+                # Step 1: 構造生成
+                structure_prompt = build_structure_prompt(body, user_settings)
+
+                log_info('WordPress Step 1: Structure generation',
+                         job_id=job_id,
+                         prompt_length=len(structure_prompt))
+
+                structure_response = claude_client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=20000,
+                    temperature=0.7,
+                    messages=[{"role": "user", "content": structure_prompt}]
+                )
+
+                structure_text = structure_response.content[0].text
+
+                # JSONをパース
+                json_match = re.search(r'```json\s*(\{.*?\})\s*```', structure_text, re.DOTALL)
+                if json_match:
+                    structure = json.loads(json_match.group(1))
+                else:
+                    structure = json.loads(structure_text)
+
+                log_info('WordPress Step 1 completed: Structure parsed',
+                         job_id=job_id,
+                         sections_count=len(structure.get('sections', [])))
+
+                # DecorationIdの検証とフィルタリング
+                validated_structure = validate_and_filter_decorations(structure, decorations)
+                log_info('Decoration validation completed', job_id=job_id)
+
+                # Step 2: WordPress HTML生成
+                content = structure_to_wordpress(validated_structure, decorations)
+                log_info('WordPress HTML generated', job_id=job_id)
+
+                generation_time = (datetime.now() - start_time).total_seconds()
                 structure_validation = {'valid': True, 'issues': [], 'headingCount': 0, 'h2Count': 0}
+
+                # メタデータ（WordPress用）
+                prompt_metadata = {
+                    'model': CLAUDE_MODEL,
+                    'temperature': Decimal('0.7'),
+                    'inputTokens': structure_response.usage.input_tokens,
+                    'outputTokens': structure_response.usage.output_tokens
+                }
 
             # 記事ID生成
             article_id = generate_article_id()
@@ -604,6 +694,7 @@ def process_sqs_message(event: Dict[str, Any], context: Any):
             reading_time = estimate_reading_time(content)
 
             # DynamoDBに記事を保存
+            generation_method = 'direct' if output_format == 'markdown' else 'two-step'
             article = {
                 'userId': user_id,
                 'articleId': article_id,
@@ -623,13 +714,8 @@ def process_sqs_message(event: Dict[str, Any], context: Any):
                     'outputFormat': output_format,
                     'generationTime': Decimal(str(round(generation_time, 2))),
                     'structureValidation': structure_validation,
-                    'generationMethod': 'two-step',
-                    'prompt': {
-                        'model': CLAUDE_MODEL,
-                        'temperature': Decimal('0.7'),
-                        'inputTokens': structure_response.usage.input_tokens,
-                        'outputTokens': structure_response.usage.output_tokens
-                    }
+                    'generationMethod': generation_method,
+                    'prompt': prompt_metadata
                 }
             }
             articles_table.put_item(Item=article)
@@ -649,9 +735,11 @@ def process_sqs_message(event: Dict[str, Any], context: Any):
             }
             update_job_status(job_id, 'completed', result=result)
 
-            log_info('Article generated successfully (two-step)',
+            log_info('Article generated successfully',
                      job_id=job_id,
                      article_id=article_id,
+                     output_format=output_format,
+                     generation_method=generation_method,
                      word_count=word_count)
 
         except json.JSONDecodeError as e:

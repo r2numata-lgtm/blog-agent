@@ -237,30 +237,53 @@ def build_decoration_instructions(decorations: DecorationSettings) -> str:
     return result
 
 
-def build_sample_article_context(samples: List[SampleArticle]) -> str:
+def build_sample_article_context(
+    samples: List[SampleArticle],
+    output_format: str = 'wordpress'
+) -> str:
     """
     P2-03: サンプル記事学習プロンプト
     アップロードされたサンプル記事から文体・構成を学習させる
+    output_formatに応じてサンプル記事をフィルタリング
     """
     if not samples:
         return ""
 
+    # 出力形式に応じてサンプル記事をフィルタリング
+    target_format = 'markdown' if output_format == 'markdown' else 'wordpress'
+    filtered_samples = [
+        s for s in samples
+        if s.get('format', 'wordpress') == target_format
+    ]
+
+    if not filtered_samples:
+        return ""
+
     sample_texts = []
-    for i, sample in enumerate(samples, 1):
+    for i, sample in enumerate(filtered_samples, 1):
         sample_texts.append(f"""### サンプル記事{i}: {sample['title']}
 
 ```
-{sample['content'][:3000]}{'...' if len(sample['content']) > 3000 else ''}
+{sample['content'][:20000]}{'...' if len(sample['content']) > 20000 else ''}
 ```""")
+
+    # Markdown用は装飾の指示を除外
+    if output_format == 'markdown':
+        style_points = """- 文末表現のパターン
+- 段落の長さと区切り方
+- 説明の詳細度
+- 読者への語りかけ方"""
+    else:
+        style_points = """- 文末表現のパターン
+- 段落の長さと区切り方
+- 説明の詳細度
+- 読者への語りかけ方
+- 装飾の使い方"""
 
     return f"""## 参考スタイル（重要）
 以下のサンプル記事の文体、表現、構成を参考にして、同様のスタイルで記事を生成してください。
 特に以下の点を分析し、模倣してください：
-- 文末表現のパターン
-- 段落の長さと区切り方
-- 説明の詳細度
-- 読者への語りかけ方
-- 装飾の使い方
+{style_points}
 
 {chr(10).join(sample_texts)}
 
@@ -400,7 +423,7 @@ def build_prompt(body: ArticleInput, settings: Optional[UserSettings] = None) ->
     # 各セクションを構築
     style_instructions = build_style_instructions(article_style)
     decoration_instructions = build_decoration_instructions(decorations)
-    sample_context = build_sample_article_context(sample_articles)
+    sample_context = build_sample_article_context(sample_articles, 'wordpress')
     internal_link_instructions = build_internal_links_instructions(internal_links)
     article_type_instructions = build_article_type_instructions(article_type)
     seo_instructions = build_seo_instructions(seo, keywords)
@@ -602,7 +625,7 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
     style_instructions = build_style_instructions(article_style)
 
     # サンプル記事コンテキスト
-    sample_context = build_sample_article_context(sample_articles)
+    sample_context = build_sample_article_context(sample_articles, 'wordpress')
 
     # 記事タイプ指示
     article_type_instructions = build_article_type_instructions(article_type)
@@ -627,17 +650,17 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
 ### 装飾使用のガイドライン
 - 装飾を使う場合は、上記リストのdecorationIdを指定する
 - スキーマの種類に応じて適切に使い分ける:
-  - paragraph: 文中の一部を強調したい場合（短いフレーズやキーワード）
-  - box: まとまった情報をボックスで囲みたい場合（**詳細な説明が必要**）
+  - paragraph（ハイライト）: **文中の強調したいフレーズやキーワードのみに適用**（一文全体ではなく、数語〜10語程度の短い表現）
+  - box: まとまった情報をボックスで囲みたい場合
 - 同じdecorationIdを連続して使わない
 - 1記事内で同じdecorationIdは最大3回まで
 - 装飾が不要な通常の段落はdecorationIdを省略する
 
 ### boxスキーマの装飾について（重要）
 - **title**: 内容を短く要約した見出し（10〜20文字程度）
-- **content**: ボックス内の本文。**必ず3〜5文の詳細な説明を記述すること**
-  - 単なる一言の要約ではなく、具体的な説明、理由、例などを含める
-  - 読者にとって価値のある情報をまとめて提供する"""
+- **content**: ボックス内の本文。**2〜3文で簡潔にまとめる、または箇条書きで整理する**
+  - 長々と書かず、要点を絞って記述する
+  - 箇条書きの場合は3〜5項目程度"""
 
     prompt = f"""あなたはブログ記事生成の専門家です。以下の情報をもとに、記事の構造をJSON形式で生成してください。
 
@@ -676,13 +699,13 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
         }},
         {{
           "type": "paragraph",
-          "content": "ボックス装飾の内容は詳細に書きます。まず、このポイントが重要な理由を説明します。次に、具体的な例や根拠を示します。さらに、読者が実践する際の注意点も加えると良いでしょう。最後に、このポイントを押さえることで得られるメリットをまとめます。",
+          "content": "この方法を使うと効率が大幅に上がります。具体的には作業時間を半分に削減できます。",
           "decorationId": "ba-point",
-          "title": "押さえるべき重要ポイント"
+          "title": "効率化のポイント"
         }},
         {{
           "type": "paragraph",
-          "content": "特に強調したいキーワードやフレーズ",
+          "content": "文中の**重要なフレーズ**のみに適用",
           "decorationId": "ba-highlight"
         }},
         {{
@@ -718,8 +741,10 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
 - boxスキーマの装飾:
   - decorationIdとtitleを両方指定
   - title: 短い見出し（10〜20文字）
-  - content: **詳細な説明文（3〜5文、100文字以上）** ← 重要！一言で終わらせない
-- paragraphスキーマの装飾: decorationIdのみ指定（titleは不要、contentは短いフレーズ）
+  - content: **2〜3文で簡潔にまとめる、または箇条書き**
+- paragraphスキーマの装飾（ハイライト）:
+  - decorationIdのみ指定（titleは不要）
+  - content: **文中の強調したいフレーズのみ**（一文全体ではなく、数語〜10語程度）
 - 装飾なし: decorationIdを省略
 
 ## 制約条件
@@ -819,3 +844,92 @@ def build_prompt_two_step(body: ArticleInput, settings: Optional[UserSettings] =
         'structure_prompt': build_structure_prompt(body, settings),
         'settings': settings or {}
     }
+
+
+def build_markdown_prompt(body: ArticleInput, settings: Optional[UserSettings] = None) -> str:
+    """
+    Markdown形式で直接記事を生成するプロンプト
+    装飾なし、純粋なMarkdownのみ
+    """
+    settings = settings or {}
+
+    # 基本情報
+    title = body.get('title', '')
+    target_audience = body.get('targetAudience', '一般')
+    purpose = body.get('purpose', '情報提供')
+    keywords = body.get('keywords', [])
+    content_points = body.get('contentPoints', '')
+    word_count = body.get('wordCount', 1500)
+    article_type = body.get('articleType', 'info')
+    internal_links = body.get('internalLinks', [])
+
+    # 設定から取得
+    article_style = settings.get('articleStyle', {})
+    sample_articles = settings.get('sampleArticles', [])
+
+    # 各セクションを構築
+    style_instructions = build_style_instructions(article_style)
+    sample_context = build_sample_article_context(sample_articles, 'markdown')
+    internal_link_instructions = build_internal_links_instructions(internal_links)
+    article_type_instructions = build_article_type_instructions(article_type)
+
+    # キーワード指示
+    keyword_text = ''
+    if keywords:
+        keyword_text = f"""
+### キーワードの活用
+以下のキーワードを記事内で自然に使用してください：
+{', '.join(keywords)}
+"""
+
+    prompt = f"""あなたはブログ記事生成の専門家です。以下の情報をもとに、Markdown形式で記事を生成してください。
+
+## 記事情報
+- タイトル: {title}
+- 対象読者: {target_audience}
+- 記事の目的: {purpose}
+- キーワード: {', '.join(keywords) if keywords else 'なし'}
+- 目標文字数: {word_count}文字程度
+
+## 内容要件
+{content_points}
+
+## 文体・スタイル
+{style_instructions}
+
+{article_type_instructions}
+
+{sample_context}
+
+{internal_link_instructions}
+
+{keyword_text}
+
+## 出力形式（重要）
+- **純粋なMarkdown形式で出力**
+- 見出しはh2(##)から開始（h1は絶対に使わない）
+- 段落は適度な長さで区切り、読みやすさを重視
+- 箇条書きや番号付きリストを適宜使用
+- 重要なポイントは**太字**で強調
+- 引用ブロック（>）を活用して重要な情報を目立たせる
+- 表（テーブル）は比較や一覧に活用
+
+## 記事構成
+1. 導入（読者の悩みに共感、記事で得られる価値を提示）
+2. 本文（3〜5つのセクション）
+3. まとめ（要点整理、次のアクションを促す）
+
+## 制約条件
+- 文字数: {word_count}文字程度（±10%の範囲内で）
+- 見出し（h2）数: 3〜6個
+- 口調: 「です・ます調」を一貫して使用
+- **必ず「まとめ」セクションで締めくくる**
+
+## 注意事項
+- 嘘や不正確な情報は書かない
+- 専門用語は初出時に簡単な説明を添える
+- 読者を見下すような表現は避ける
+
+**重要: Markdownのみを出力してください。説明文や前置き、コードブロック（```）で囲むことは不要です。**"""
+
+    return prompt

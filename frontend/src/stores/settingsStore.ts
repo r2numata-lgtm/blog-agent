@@ -163,7 +163,7 @@ export interface SampleArticle {
   id: string;
   title: string;
   content: string;
-  format: 'html' | 'markdown';
+  format: 'wordpress' | 'markdown';
   createdAt: string;
 }
 

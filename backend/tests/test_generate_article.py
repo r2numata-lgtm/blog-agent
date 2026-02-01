@@ -228,18 +228,45 @@ class TestPromptBuilder:
 
     def test_build_sample_article_context_empty(self):
         """サンプル記事なしの場合"""
-        result = build_sample_article_context([])
+        result = build_sample_article_context([], 'wordpress')
         assert result == ''
 
-    def test_build_sample_article_context_with_samples(self):
-        """サンプル記事ありの場合"""
+    def test_build_sample_article_context_with_wordpress_samples(self):
+        """WordPress用サンプル記事ありの場合"""
         samples = [
-            {'id': '1', 'title': 'サンプル1', 'content': 'サンプル内容', 'format': 'markdown'},
+            {'id': '1', 'title': 'サンプル1', 'content': 'サンプル内容', 'format': 'wordpress'},
         ]
-        result = build_sample_article_context(samples)
+        result = build_sample_article_context(samples, 'wordpress')
         assert 'サンプル記事1' in result
         assert 'サンプル1' in result
         assert '文体' in result or 'スタイル' in result
+        assert '装飾の使い方' in result  # WordPress用は装飾指示あり
+
+    def test_build_sample_article_context_with_markdown_samples(self):
+        """Markdown用サンプル記事ありの場合"""
+        samples = [
+            {'id': '1', 'title': 'MDサンプル', 'content': '# 見出し\n本文', 'format': 'markdown'},
+        ]
+        result = build_sample_article_context(samples, 'markdown')
+        assert 'サンプル記事1' in result
+        assert 'MDサンプル' in result
+        assert '装飾の使い方' not in result  # Markdown用は装飾指示なし
+
+    def test_build_sample_article_context_filters_by_format(self):
+        """出力形式に応じてサンプルがフィルタリングされる"""
+        samples = [
+            {'id': '1', 'title': 'WordPress記事', 'content': '内容', 'format': 'wordpress'},
+            {'id': '2', 'title': 'Markdown記事', 'content': '内容', 'format': 'markdown'},
+        ]
+        # WordPress用
+        wp_result = build_sample_article_context(samples, 'wordpress')
+        assert 'WordPress記事' in wp_result
+        assert 'Markdown記事' not in wp_result
+
+        # Markdown用
+        md_result = build_sample_article_context(samples, 'markdown')
+        assert 'Markdown記事' in md_result
+        assert 'WordPress記事' not in md_result
 
     def test_build_internal_links_instructions_empty(self):
         """内部リンクなしの場合"""
@@ -479,6 +506,100 @@ class TestSettingsValidation:
         error = validate_settings(settings)
         assert error is not None
         assert 'サンプル記事' in error
+
+
+class TestMarkdownGeneration:
+    """Markdown生成のテスト"""
+
+    def test_block_to_markdown_plain_paragraph(self):
+        """通常の段落のMarkdown変換"""
+        # app.pyからインポート
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'functions' / 'generate-article'))
+        from app import block_to_markdown_plain
+
+        block = {'type': 'paragraph', 'content': 'これはテスト段落です。'}
+        result = block_to_markdown_plain(block)
+        assert result == ['これはテスト段落です。']
+
+    def test_block_to_markdown_plain_box_with_title(self):
+        """ボックス装飾（タイトル付き）のMarkdown変換"""
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'functions' / 'generate-article'))
+        from app import block_to_markdown_plain
+
+        block = {
+            'type': 'paragraph',
+            'content': 'ボックスの内容です。',
+            'decorationId': 'ba-point',
+            'title': 'ポイント'
+        }
+        result = block_to_markdown_plain(block)
+        # 引用ブロックとして出力される
+        assert '> **ポイント**' in result
+        assert '> ボックスの内容です。' in result
+
+    def test_block_to_markdown_plain_highlight(self):
+        """ハイライト（タイトルなし）のMarkdown変換"""
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'functions' / 'generate-article'))
+        from app import block_to_markdown_plain
+
+        block = {
+            'type': 'paragraph',
+            'content': '強調フレーズ',
+            'decorationId': 'ba-highlight'
+        }
+        result = block_to_markdown_plain(block)
+        # タイトルがないので通常の段落として出力
+        assert result == ['強調フレーズ']
+
+    def test_block_to_markdown_plain_list(self):
+        """リストのMarkdown変換"""
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'functions' / 'generate-article'))
+        from app import block_to_markdown_plain
+
+        block = {
+            'type': 'list',
+            'listType': 'unordered',
+            'items': ['項目1', '項目2', '項目3']
+        }
+        result = block_to_markdown_plain(block)
+        assert '- 項目1' in result
+        assert '- 項目2' in result
+        assert '- 項目3' in result
+
+    def test_block_to_markdown_plain_ordered_list(self):
+        """番号付きリストのMarkdown変換"""
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'functions' / 'generate-article'))
+        from app import block_to_markdown_plain
+
+        block = {
+            'type': 'list',
+            'listType': 'ordered',
+            'items': ['手順1', '手順2']
+        }
+        result = block_to_markdown_plain(block)
+        assert '1. 手順1' in result
+        assert '2. 手順2' in result
+
+    def test_structure_to_markdown_no_decorations(self):
+        """構造からMarkdown生成（装飾なし）"""
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'functions' / 'generate-article'))
+        from app import structure_to_markdown
+
+        structure = {
+            'sections': [
+                {
+                    'heading': 'はじめに',
+                    'blocks': [
+                        {'type': 'paragraph', 'content': '導入文です。'}
+                    ]
+                }
+            ]
+        }
+        result = structure_to_markdown(structure, [])
+        assert '## はじめに' in result
+        assert '導入文です。' in result
+        # 装飾タグが含まれていないことを確認
+        assert ':::box' not in result
 
 
 if __name__ == '__main__':
