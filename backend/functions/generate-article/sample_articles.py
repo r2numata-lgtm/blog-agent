@@ -315,7 +315,6 @@ DEFAULT_SAMPLE_ARTICLE_WORDPRESS: SampleArticle = {
 <!-- wp:paragraph -->
 <p>あなたのブログライフが素敵なものになることを、心から願っています。</p>
 <!-- /wp:paragraph -->"""
-}"""
 }
 
 

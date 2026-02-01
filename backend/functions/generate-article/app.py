@@ -520,6 +520,14 @@ def process_sqs_message(event: Dict[str, Any], context: Any):
             else:
                 user_settings = get_default_settings()
 
+            # サンプル記事がない場合はデフォルトを使用
+            if not user_settings.get('sampleArticles'):
+                from sample_articles import get_default_sample_article
+                sample_wp = get_default_sample_article('wordpress')
+                sample_md = get_default_sample_article('markdown')
+                user_settings['sampleArticles'] = [sample_wp, sample_md]
+                log_info('Using default sample articles', job_id=job_id)
+
             # 装飾設定を取得（新スキーマ：list形式）
             decorations = user_settings.get('decorations', [])
             if not isinstance(decorations, list):
