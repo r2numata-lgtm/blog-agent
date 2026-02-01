@@ -7,7 +7,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { serialize, parse } from '@wordpress/blocks';
+import { serialize } from '@wordpress/blocks';
 import { registerCoreBlocks } from '@wordpress/block-library';
 import { registerCustomBlocks } from '../../utils/customBlocks';
 import { MarkdownEditor } from '../../components/editor';
@@ -15,10 +15,11 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import {
   updateArticle,
+  updateMarkdownArticle,
   getArticle,
   getArticleBlocks,
-  type OutputFormat,
   type SavedArticle,
+  type OutputFormat,
 } from '../../services/articleStorage';
 import { getAllDecorationCSS } from '../../services/decorationService';
 
@@ -110,33 +111,8 @@ const EditorPage: React.FC = () => {
             setHtmlContent(serialize(loadedBlocks));
           }
         } else if (loadedArticle.outputFormat === 'markdown') {
-          // Markdown記事の場合はcontentをMarkdownとして扱う
-          // （保存時にHTML→Markdown変換している場合の対応）
-          const content = loadedArticle.content;
-          // HTMLコメントを除去してMarkdownとして表示
-          const cleanContent = content
-            .replace(/<!-- wp:[^>]+ -->/g, '')
-            .replace(/<!-- \/wp:[^>]+ -->/g, '')
-            .replace(/<[^>]+>/g, (match) => {
-              // 基本的なHTML→Markdown変換
-              if (match.match(/<h2[^>]*>/)) return '## ';
-              if (match.match(/<h3[^>]*>/)) return '### ';
-              if (match.match(/<\/h[23]>/)) return '\n\n';
-              if (match.match(/<p[^>]*>/)) return '';
-              if (match.match(/<\/p>/)) return '\n\n';
-              if (match.match(/<strong>/)) return '**';
-              if (match.match(/<\/strong>/)) return '**';
-              if (match.match(/<em>/)) return '*';
-              if (match.match(/<\/em>/)) return '*';
-              if (match.match(/<ul[^>]*>/)) return '';
-              if (match.match(/<\/ul>/)) return '\n';
-              if (match.match(/<li[^>]*>/)) return '- ';
-              if (match.match(/<\/li>/)) return '\n';
-              return '';
-            })
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-          setMarkdownContent(cleanContent || content);
+          // Markdown記事の場合はそのまま使用
+          setMarkdownContent(loadedArticle.content);
         }
       }
     } else {
@@ -163,10 +139,8 @@ const EditorPage: React.FC = () => {
       if (article.outputFormat === 'wordpress') {
         updated = updateArticle(article.id, blocks, article.title);
       } else {
-        // Markdown: markdownContentをHTMLに変換して保存（内部的にはブロック形式）
-        const htmlFromMd = marked(markdownContent) as string;
-        const tempBlocks = parse(`<!-- wp:html -->${htmlFromMd}<!-- /wp:html -->`);
-        updated = updateArticle(article.id, tempBlocks.length > 0 ? tempBlocks : blocks, article.title);
+        // Markdown: Markdownをそのまま保存
+        updated = updateMarkdownArticle(article.id, markdownContent, article.title);
       }
       if (updated) {
         setArticle(updated);

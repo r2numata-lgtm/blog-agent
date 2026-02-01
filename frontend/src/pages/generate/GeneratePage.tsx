@@ -12,8 +12,8 @@ import {
   type InternalLink,
   type JobStatus,
 } from '../../services/articleApi';
-import { createArticle } from '../../services/articleStorage';
-import { markdownToBlocks, initializeBlocks } from '../../utils/markdownToBlocks';
+import { createArticle, createMarkdownArticle } from '../../services/articleStorage';
+import { initializeBlocks } from '../../utils/markdownToBlocks';
 import { parse } from '@wordpress/blocks';
 import {
   getErrorMessage,
@@ -223,12 +223,16 @@ const GeneratePage: React.FC = () => {
       setRetryCount(0);
 
       // 生成された記事をlocalStorageに保存
-      initializeBlocks();
-      // 出力形式に応じてブロックを生成
-      const blocks = outputFormat === 'wordpress'
-        ? parse(response.markdown)  // WordPress: Gutenbergブロック形式をそのままパース
-        : markdownToBlocks(response.markdown);  // Markdown: 変換
-      const savedArticle = createArticle(blocks, response.title, outputFormat);
+      let savedArticle;
+      if (outputFormat === 'markdown') {
+        // Markdown: そのまま保存
+        savedArticle = createMarkdownArticle(response.markdown, response.title);
+      } else {
+        // WordPress: ブロック形式に変換して保存
+        initializeBlocks();
+        const blocks = parse(response.markdown);
+        savedArticle = createArticle(blocks, response.title, outputFormat);
+      }
 
       setCurrentStep('complete');
 

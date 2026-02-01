@@ -184,8 +184,10 @@ ${editorScopedCSS}
   font-size: 1.5em;
   font-weight: 700;
   margin: 2em 0 1em;
-  padding-bottom: 0.5em;
-  border-bottom: 2px solid #2196f3;
+  padding: 0.5em 0 0.5em 1em;
+  border-left: 4px solid #2196f3;
+  border-bottom: 1px solid #e0e0e0;
+  background: linear-gradient(90deg, #e3f2fd 0%, transparent 100%);
   line-height: 1.3;
 }
 
@@ -193,6 +195,8 @@ ${editorScopedCSS}
   font-size: 1.25em;
   font-weight: 700;
   margin: 1.5em 0 0.75em;
+  padding: 0.3em 0 0.3em 0.75em;
+  border-left: 3px solid #64b5f6;
   line-height: 1.4;
 }
 
@@ -200,6 +204,8 @@ ${editorScopedCSS}
   font-size: 1.1em;
   font-weight: 700;
   margin: 1.25em 0 0.5em;
+  padding-left: 0.5em;
+  border-left: 2px solid #90caf9;
 }
 
 .ba-article h5,
@@ -353,8 +359,10 @@ ${css}
   font-size: 1.5em;
   font-weight: 700;
   margin: 2em 0 1em;
-  padding-bottom: 0.5em;
-  border-bottom: 2px solid #2196f3;
+  padding: 0.5em 0 0.5em 1em;
+  border-left: 4px solid #2196f3;
+  border-bottom: 1px solid #e0e0e0;
+  background: linear-gradient(90deg, #e3f2fd 0%, transparent 100%);
   line-height: 1.3;
 }
 
@@ -362,6 +370,8 @@ ${css}
   font-size: 1.25em;
   font-weight: 700;
   margin: 1.5em 0 0.75em;
+  padding: 0.3em 0 0.3em 0.75em;
+  border-left: 3px solid #64b5f6;
   line-height: 1.4;
 }
 
@@ -369,6 +379,8 @@ ${css}
   font-size: 1.1em;
   font-weight: 700;
   margin: 1.25em 0 0.5em;
+  padding-left: 0.5em;
+  border-left: 2px solid #90caf9;
 }
 
 .ba-article h5,

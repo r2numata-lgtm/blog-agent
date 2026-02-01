@@ -467,6 +467,29 @@ function blockToMarkdown(block: BlockInstance): string {
     case 'core/separator':
       return '---';
 
+    case 'core/table': {
+      const head = attributes.head as Array<{ cells: Array<{ content: string }> }> || [];
+      const body = attributes.body as Array<{ cells: Array<{ content: string }> }> || [];
+      const lines: string[] = [];
+
+      // ヘッダー行
+      if (head.length > 0) {
+        const headerRow = head[0];
+        const headerCells = headerRow.cells.map((cell) => cell.content || '');
+        lines.push('| ' + headerCells.join(' | ') + ' |');
+        // 区切り行
+        lines.push('| ' + headerCells.map(() => '---').join(' | ') + ' |');
+      }
+
+      // ボディ行
+      for (const row of body) {
+        const cells = row.cells.map((cell) => cell.content || '');
+        lines.push('| ' + cells.join(' | ') + ' |');
+      }
+
+      return lines.join('\n');
+    }
+
     case 'blog-agent/box':
       // 新形式: decorationIdがある場合はそれを使用
       if (attributes.decorationId) {

@@ -77,7 +77,7 @@ function saveAllArticles(articles: SavedArticle[]): void {
 }
 
 /**
- * 記事を作成
+ * 記事を作成（WordPress用 - ブロック形式）
  */
 export function createArticle(
   blocks: BlockInstance[],
@@ -107,7 +107,46 @@ export function createArticle(
 }
 
 /**
- * 記事を更新
+ * Markdown記事を作成（Markdownをそのまま保存）
+ */
+export function createMarkdownArticle(
+  markdown: string,
+  title?: string
+): SavedArticle {
+  const now = new Date().toISOString();
+
+  // 文字数をカウント
+  const wordCount = markdown.replace(/\s/g, '').length;
+
+  const article: SavedArticle = {
+    id: generateId(),
+    title: title || '無題の記事',
+    content: markdown,  // Markdownをそのまま保存
+    meta: {
+      title: title || '無題の記事',
+      description: markdown.slice(0, 140).replace(/[#*\n]/g, ' ').trim(),
+      keywords: [],
+      author: '',
+      wordCount,
+      blockCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    },
+    outputFormat: 'markdown',
+    status: 'draft',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const articles = getAllArticles();
+  articles.push(article);
+  saveAllArticles(articles);
+
+  return article;
+}
+
+/**
+ * 記事を更新（WordPress用 - ブロック形式）
  */
 export function updateArticle(id: string, blocks: BlockInstance[], title?: string): SavedArticle | null {
   const articles = getAllArticles();
@@ -129,6 +168,36 @@ export function updateArticle(id: string, blocks: BlockInstance[], title?: strin
     title: meta.title || '無題の記事',
     content,
     meta,
+    updatedAt: now,
+  };
+
+  saveAllArticles(articles);
+  return articles[index];
+}
+
+/**
+ * Markdown記事を更新（Markdownをそのまま保存）
+ */
+export function updateMarkdownArticle(id: string, markdown: string, title?: string): SavedArticle | null {
+  const articles = getAllArticles();
+  const index = articles.findIndex(a => a.id === id);
+
+  if (index === -1) return null;
+
+  const now = new Date().toISOString();
+  const wordCount = markdown.replace(/\s/g, '').length;
+  const existingMeta = articles[index].meta;
+
+  articles[index] = {
+    ...articles[index],
+    title: title || existingMeta.title || '無題の記事',
+    content: markdown,
+    meta: {
+      ...existingMeta,
+      title: title || existingMeta.title,
+      wordCount,
+      updatedAt: now,
+    },
     updatedAt: now,
   };
 
