@@ -10,15 +10,84 @@ import {
   SEMANTIC_ROLES,
   SCHEMA_LABELS,
   type ArticleStyleSettings,
+  type DecorationSchema,
 } from '../../stores/settingsStore';
 import {
   getDecorationSettings,
   toggleDecorationEnabled,
   generateWordPressCSS,
   getDecorationWithRoles,
+  getAllDecorationCSS,
   type Decoration,
 } from '../../services/decorationService';
 import type { DecorationWithRoles } from '../../stores/settingsStore';
+
+// 装飾プレビュー用のサンプルコンテンツを生成
+const getPreviewContent = (schema: DecorationSchema, decorationClass: string) => {
+  switch (schema) {
+    case 'paragraph':
+      return (
+        <p>
+          この文章の中で<span className={decorationClass}>重要なポイント</span>を強調することができます。
+        </p>
+      );
+    case 'box':
+      return (
+        <div className={decorationClass}>
+          <p className="box-title">ポイントのタイトル</p>
+          <p>ここにボックスの内容が入ります。重要な情報や補足説明を記載できます。</p>
+        </div>
+      );
+    case 'list':
+      return (
+        <div className={decorationClass}>
+          <p className="box-title">まとめ</p>
+          <ul>
+            <li>リスト項目1: 重要なポイント</li>
+            <li>リスト項目2: 次のステップ</li>
+            <li>リスト項目3: 注意事項</li>
+          </ul>
+        </div>
+      );
+    case 'table':
+      return (
+        <div className={decorationClass}>
+          <table>
+            <thead>
+              <tr>
+                <th>項目</th>
+                <th>内容</th>
+                <th>備考</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>項目A</td>
+                <td>説明文A</td>
+                <td>補足A</td>
+              </tr>
+              <tr>
+                <td>項目B</td>
+                <td>説明文B</td>
+                <td>補足B</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      );
+    case 'callout':
+      return (
+        <div className={decorationClass}>
+          <p>今すぐ始めたい方はこちらからお申し込みください。</p>
+          <a href="#" className="callout-button" onClick={(e) => e.preventDefault()}>
+            詳細を見る
+          </a>
+        </div>
+      );
+    default:
+      return <p>プレビューがありません</p>;
+  }
+};
 
 export const ArticleSettingsPage = () => {
   const {
@@ -39,6 +108,7 @@ export const ArticleSettingsPage = () => {
   const [showCopied, setShowCopied] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [previewDecoration, setPreviewDecoration] = useState<DecorationWithRoles | null>(null);
   const wordpressFileInputRef = useRef<HTMLInputElement>(null);
   const markdownFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -574,13 +644,18 @@ export const ArticleSettingsPage = () => {
                 return (
                 <div
                   key={decoration.id}
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer"
+                  onClick={() => decorationWithRoles && setPreviewDecoration(decorationWithRoles)}
                 >
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
                       <span className="font-medium text-gray-900">
                         {decoration.displayName}
                       </span>
+                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 mt-1">
                       <p className="text-xs text-gray-500">
@@ -607,7 +682,10 @@ export const ArticleSettingsPage = () => {
                     </div>
                   </div>
                   <div
-                    onClick={() => handleToggleDecoration(decoration.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleDecoration(decoration.id);
+                    }}
                     className="cursor-pointer"
                   >
                     <div
@@ -785,6 +863,84 @@ export const ArticleSettingsPage = () => {
           </p>
         </div>
       </div>
+
+      {/* 装飾プレビューモーダル */}
+      {previewDecoration && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={() => setPreviewDecoration(null)}
+        >
+          <div
+            className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* ヘッダー */}
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">{previewDecoration.label}</h2>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded">
+                    {SCHEMA_LABELS[previewDecoration.schema]?.label || previewDecoration.schema}
+                  </span>
+                  {previewDecoration.roles.map(role => (
+                    <span
+                      key={role}
+                      className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded"
+                    >
+                      {SEMANTIC_ROLES[role]?.label || role}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <button
+                onClick={() => setPreviewDecoration(null)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition"
+              >
+                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* プレビュー */}
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              <h3 className="text-sm font-medium text-gray-700 mb-3">プレビュー</h3>
+              <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
+                <style dangerouslySetInnerHTML={{ __html: getAllDecorationCSS() }} />
+                <div className="ba-article">
+                  {getPreviewContent(previewDecoration.schema, previewDecoration.class)}
+                </div>
+              </div>
+
+              {/* CSS表示 */}
+              <h3 className="text-sm font-medium text-gray-700 mt-6 mb-3">CSS</h3>
+              <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto">
+                <pre className="text-sm text-gray-100 font-mono whitespace-pre-wrap">
+                  {previewDecoration.css}
+                </pre>
+              </div>
+
+              {/* クラス名 */}
+              <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <span className="font-medium">クラス名:</span>{' '}
+                  <code className="bg-blue-100 px-2 py-0.5 rounded">.{previewDecoration.class}</code>
+                </p>
+              </div>
+            </div>
+
+            {/* フッター */}
+            <div className="px-6 py-4 border-t bg-gray-50 flex justify-end">
+              <button
+                onClick={() => setPreviewDecoration(null)}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
