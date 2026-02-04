@@ -458,6 +458,47 @@ def block_to_wordpress(block: Dict[str, Any], decorations: list) -> list:
         for sub_block in block.get('blocks', []):
             blocks.extend(block_to_wordpress(sub_block, decorations))
 
+    elif block_type == 'table':
+        # テーブルブロック
+        headers = block.get('headers', [])
+        rows = block.get('rows', [])
+        dec_class = decoration.get('class', decoration_id) if decoration else 'ba-table'
+
+        # ヘッダー行
+        header_cells = ''.join(f'<th>{html_escape(h)}</th>' for h in headers)
+        header_row = f'<tr>{header_cells}</tr>'
+
+        # データ行
+        data_rows = []
+        for row in rows:
+            cells = ''.join(f'<td>{convert_inline_markdown(cell)}</td>' for cell in row)
+            data_rows.append(f'<tr>{cells}</tr>')
+
+        blocks.append(
+            f'<!-- wp:html -->\n'
+            f'<div class="{dec_class}">\n'
+            f'<table>\n{header_row}\n' + '\n'.join(data_rows) + '\n</table>\n'
+            f'</div>\n'
+            f'<!-- /wp:html -->'
+        )
+
+    elif block_type == 'callout':
+        # コールアウトブロック（アクションボタン）
+        button_text = block.get('buttonText', 'クリック')
+        button_url = block.get('buttonUrl', '#')
+        dec_class = decoration.get('class', decoration_id) if decoration else 'ba-callout'
+        title_html = f'<p class="box-title">{html_escape(title)}</p>\n' if title else ''
+
+        blocks.append(
+            f'<!-- wp:html -->\n'
+            f'<div class="{dec_class}">\n'
+            f'{title_html}'
+            f'<p>{convert_inline_markdown(content)}</p>\n'
+            f'<a href="{button_url}" class="callout-button">{html_escape(button_text)}</a>\n'
+            f'</div>\n'
+            f'<!-- /wp:html -->'
+        )
+
     return blocks
 
 

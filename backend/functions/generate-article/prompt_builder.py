@@ -735,6 +735,23 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
               "content": "小見出し内の詳細な説明を記載します。"
             }}
           ]
+        }},
+        {{
+          "type": "table",
+          "headers": ["項目", "内容", "備考"],
+          "rows": [
+            ["項目1", "説明文1", "補足1"],
+            ["項目2", "説明文2", "補足2"]
+          ],
+          "decorationId": "ba-table"
+        }},
+        {{
+          "type": "callout",
+          "content": "今すぐ始めたい方は、こちらのリンクからお申し込みください。",
+          "buttonText": "詳細を見る",
+          "buttonUrl": "https://example.com",
+          "decorationId": "ba-callout",
+          "title": "お得な情報"
         }}
       ]
     }}
@@ -749,6 +766,8 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
 - "paragraph": 通常の段落（decorationIdで装飾可能）
 - "list": リスト（listType: "unordered" または "ordered"、decorationIdで装飾可能）
 - "subsection": H3小見出しセクション（blocks配列を含む）
+- "table": 表（headers: 列見出しの配列、rows: 行データの2次元配列、decorationIdで装飾可能）
+- "callout": コールアウト（content: 本文、buttonText: ボタンテキスト、buttonUrl: ボタンURL、decorationIdで装飾可能）
 
 ## 装飾の指定方法
 - paragraphへのbox装飾:
@@ -762,6 +781,16 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
 - paragraphスキーマの装飾（ハイライト）:
   - decorationIdのみ指定（titleは不要）
   - content: **文中の強調したいフレーズのみ**（一文全体ではなく、数語〜10語程度）
+- tableへの装飾:
+  - decorationId: "ba-table"
+  - headers: 列見出しの配列（例: ["項目", "内容", "備考"]）
+  - rows: 行データの2次元配列（例: [["項目1", "説明1", "補足1"], ["項目2", "説明2", "補足2"]]）
+- calloutへの装飾:
+  - decorationId: "ba-callout"
+  - content: コールアウトの本文
+  - buttonText: ボタンに表示するテキスト
+  - buttonUrl: ボタンのリンク先URL
+  - title: オプションで見出しを付けられる
 - 装飾なし: decorationIdを省略
 
 ## 制約条件
