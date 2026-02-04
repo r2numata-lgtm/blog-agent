@@ -612,6 +612,7 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
     content_points = body.get('contentPoints', '')
     word_count = body.get('wordCount', 1500)
     article_type = body.get('articleType', 'info')
+    internal_links = body.get('internalLinks', [])
 
     # 設定から取得
     article_style = settings.get('articleStyle', {})
@@ -629,6 +630,9 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
 
     # 記事タイプ指示
     article_type_instructions = build_article_type_instructions(article_type)
+
+    # 内部リンク指示
+    internal_link_instructions = build_internal_links_instructions(internal_links)
 
     # 利用可能な装飾の説明
     decorations_explanation = ""
@@ -683,6 +687,8 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
 
 {sample_context}
 
+{internal_link_instructions}
+
 ## 出力形式（JSON）
 以下の形式で記事構造を出力してください。**必ずJSONのみを出力し、他の説明は不要です。**
 
@@ -714,6 +720,13 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
           "items": ["項目1の説明文", "項目2の説明文", "項目3の説明文"]
         }},
         {{
+          "type": "list",
+          "listType": "ordered",
+          "items": ["まとめ項目1", "まとめ項目2", "まとめ項目3"],
+          "decorationId": "ba-summary-list",
+          "title": "この記事のまとめ"
+        }},
+        {{
           "type": "subsection",
           "heading": "H3見出し",
           "blocks": [
@@ -734,14 +747,18 @@ def build_structure_prompt(body: ArticleInput, settings: Optional[UserSettings] 
 
 ## ブロックタイプ
 - "paragraph": 通常の段落（decorationIdで装飾可能）
-- "list": リスト（listType: "unordered" または "ordered"）
+- "list": リスト（listType: "unordered" または "ordered"、decorationIdで装飾可能）
 - "subsection": H3小見出しセクション（blocks配列を含む）
 
 ## 装飾の指定方法
-- boxスキーマの装飾:
+- paragraphへのbox装飾:
   - decorationIdとtitleを両方指定
   - title: 短い見出し（10〜20文字）
-  - content: **2〜3文で簡潔にまとめる、または箇条書き**
+  - content: **2〜3文で簡潔にまとめる**
+- listへのbox装飾（まとめリストなど）:
+  - decorationIdとtitleを両方指定
+  - title: 短い見出し（10〜20文字）
+  - items: リスト項目の配列
 - paragraphスキーマの装飾（ハイライト）:
   - decorationIdのみ指定（titleは不要）
   - content: **文中の強調したいフレーズのみ**（一文全体ではなく、数語〜10語程度）

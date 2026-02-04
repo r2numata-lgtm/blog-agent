@@ -348,6 +348,30 @@ def html_escape(text: str) -> str:
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
 
 
+def convert_inline_markdown(text: str) -> str:
+    """インラインMarkdown記法をHTMLに変換"""
+    import re
+
+    # リンク [text](url) → <a href="url">text</a>
+    def replace_link(match):
+        link_text = match.group(1)
+        url = match.group(2)
+        # セキュリティ: 許可されたURLスキームのみ
+        if not (url.startswith('http://') or url.startswith('https://') or url.startswith('/')):
+            return match.group(0)
+        return f'<a href="{url}">{link_text}</a>'
+
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', replace_link, text)
+
+    # 太字 **text** → <strong>text</strong>
+    text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+
+    # イタリック *text* → <em>text</em>
+    text = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'<em>\1</em>', text)
+
+    return text
+
+
 def block_to_wordpress(block: Dict[str, Any], decorations: list) -> list:
     """ブロックをWordPress Gutenbergブロック形式に変換"""
     blocks = []
@@ -370,7 +394,7 @@ def block_to_wordpress(block: Dict[str, Any], decorations: list) -> list:
                 # インライン装飾（paragraph schema）→ 段落内にspan
                 blocks.append(
                     f'<!-- wp:paragraph -->\n'
-                    f'<p><span class="{dec_class}">{html_escape(content)}</span></p>\n'
+                    f'<p><span class="{dec_class}">{convert_inline_markdown(content)}</span></p>\n'
                     f'<!-- /wp:paragraph -->'
                 )
             else:
@@ -380,13 +404,13 @@ def block_to_wordpress(block: Dict[str, Any], decorations: list) -> list:
                     f'<!-- wp:html -->\n'
                     f'<div class="{dec_class}">\n'
                     f'{title_html}'
-                    f'<p>{html_escape(content)}</p>\n'
+                    f'<p>{convert_inline_markdown(content)}</p>\n'
                     f'</div>\n'
                     f'<!-- /wp:html -->'
                 )
         else:
             # 通常の段落
-            blocks.append(f'<!-- wp:paragraph -->\n<p>{html_escape(content)}</p>\n<!-- /wp:paragraph -->')
+            blocks.append(f'<!-- wp:paragraph -->\n<p>{convert_inline_markdown(content)}</p>\n<!-- /wp:paragraph -->')
 
     elif block_type == 'list':
         list_type = block.get('listType', 'unordered')
@@ -401,7 +425,7 @@ def block_to_wordpress(block: Dict[str, Any], decorations: list) -> list:
             block_name = 'list'
             attrs = ''
 
-        items_html = '\n'.join(f'<li>{html_escape(item)}</li>' for item in items)
+        items_html = '\n'.join(f'<li>{convert_inline_markdown(item)}</li>' for item in items)
 
         if decoration:
             # 装飾付きリスト → カスタムHTMLブロック、タイトルがあれば追加
