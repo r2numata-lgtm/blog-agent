@@ -2,10 +2,9 @@
  * EditorPage - 記事エディタページ
  * WordPress: コードエディタ / プレビュー（2タブ）
  * Markdown: Markdownエディタ / プレビュー（2タブ）
- * チャット修正機能付き
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { serialize } from '@wordpress/blocks';
 import { registerCoreBlocks } from '@wordpress/block-library';
@@ -82,14 +81,6 @@ const EditorPage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [decorationCSS, setDecorationCSS] = useState('');
-
-  // チャット状態
-  const [showChat, setShowChat] = useState(false);
-  const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [isChatLoading, setIsChatLoading] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
 
   // 装飾CSSを読み込み
   useEffect(() => {
@@ -197,34 +188,6 @@ const EditorPage: React.FC = () => {
     URL.revokeObjectURL(url);
   }, [article, htmlContent, markdownContent]);
 
-  // チャット送信
-  const handleSendChat = useCallback(async () => {
-    if (!chatInput.trim() || isChatLoading) return;
-
-    const userMessage = chatInput.trim();
-    setChatInput('');
-    setChatMessages(prev => [...prev, { role: 'user', content: userMessage }]);
-    setIsChatLoading(true);
-
-    try {
-      // TODO: バックエンドAPIに接続
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      const mockResponse = `了解しました。「${userMessage}」に基づいて記事を修正します。\n\n修正が完了しました。変更内容を確認してください。`;
-      setChatMessages(prev => [...prev, { role: 'assistant', content: mockResponse }]);
-    } catch (error) {
-      console.error('Chat error:', error);
-      setChatMessages(prev => [...prev, { role: 'assistant', content: 'エラーが発生しました。再度お試しください。' }]);
-    } finally {
-      setIsChatLoading(false);
-    }
-  }, [chatInput, isChatLoading]);
-
-  // チャットスクロール
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
-
   // Markdownプレビュー生成
   const markdownPreviewHtml = useCallback(() => {
     // markedオプションを設定
@@ -301,15 +264,6 @@ const EditorPage: React.FC = () => {
           >
             {isSaving ? '保存中...' : '保存'}
           </button>
-          <button
-            onClick={() => setShowChat(!showChat)}
-            className={`px-3 py-1.5 text-sm border rounded flex items-center gap-1 ${showChat ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50'}`}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
-            AI修正
-          </button>
         </div>
       </div>
 
@@ -368,7 +322,7 @@ const EditorPage: React.FC = () => {
       {/* メインコンテンツ */}
       <div className="flex-1 flex overflow-hidden">
         {/* エディタエリア */}
-        <div className={`flex-1 overflow-hidden ${showChat ? 'border-r' : ''}`}>
+        <div className="flex-1 overflow-hidden">
           {/* WordPress: コードエディタ */}
           {isWordPress && wpTab === 'code' && (
             <div className="h-full">
@@ -419,81 +373,6 @@ const EditorPage: React.FC = () => {
             </div>
           )}
         </div>
-
-        {/* チャットパネル */}
-        {showChat && (
-          <div className="w-96 flex flex-col bg-white">
-            <div className="p-4 border-b flex items-center justify-between">
-              <h3 className="font-semibold">AI修正アシスタント</h3>
-              <button
-                onClick={() => setShowChat(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {chatMessages.length === 0 && (
-                <div className="text-center text-gray-500 py-8">
-                  <p className="mb-2">AIに修正を指示できます</p>
-                  <p className="text-sm">例: 「導入部分をもっと魅力的にして」</p>
-                </div>
-              )}
-              {chatMessages.map((msg, index) => (
-                <div
-                  key={index}
-                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[80%] p-3 rounded-lg ${
-                      msg.role === 'user'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-800'
-                    }`}
-                  >
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                  </div>
-                </div>
-              ))}
-              {isChatLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-gray-100 p-3 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div ref={chatEndRef} />
-            </div>
-
-            <div className="p-4 border-t">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendChat()}
-                  placeholder="修正指示を入力..."
-                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={isChatLoading}
-                />
-                <button
-                  onClick={handleSendChat}
-                  disabled={isChatLoading || !chatInput.trim()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  送信
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
