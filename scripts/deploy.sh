@@ -53,6 +53,14 @@ fi
 
 echo "Claude API Key found: ${CLAUDE_API_KEY:0:20}..."
 
+# Stripe環境変数の読み込み
+if [ -z "$STRIPE_SECRET_KEY" ] && [ -f "backend/.env" ]; then
+  export STRIPE_SECRET_KEY=$(grep "^STRIPE_SECRET_KEY=" backend/.env | cut -d '=' -f2)
+  export STRIPE_WEBHOOK_SECRET=$(grep "^STRIPE_WEBHOOK_SECRET=" backend/.env | cut -d '=' -f2)
+  export STRIPE_STARTER_PRICE_ID=$(grep "^STRIPE_STARTER_PRICE_ID=" backend/.env | cut -d '=' -f2)
+  export STRIPE_PRO_PRICE_ID=$(grep "^STRIPE_PRO_PRICE_ID=" backend/.env | cut -d '=' -f2)
+fi
+
 echo "Step 1: Deploying CloudFormation stack..."
 aws cloudformation deploy \
   --template-file infra/cloudformation.yaml \
@@ -60,6 +68,10 @@ aws cloudformation deploy \
   --parameter-overrides \
     Environment=$ENV \
     ClaudeApiKey=$CLAUDE_API_KEY \
+    StripeSecretKey="${STRIPE_SECRET_KEY:-}" \
+    StripeWebhookSecret="${STRIPE_WEBHOOK_SECRET:-}" \
+    StripeStarterPriceId="${STRIPE_STARTER_PRICE_ID:-}" \
+    StripeProPriceId="${STRIPE_PRO_PRICE_ID:-}" \
   --capabilities CAPABILITY_NAMED_IAM \
   --no-fail-on-empty-changeset \
   --region $AWS_REGION
@@ -99,6 +111,8 @@ VITE_API_BASE_URL=$API_ENDPOINT
 VITE_COGNITO_USER_POOL_ID=$USER_POOL_ID
 VITE_COGNITO_CLIENT_ID=$USER_POOL_CLIENT_ID
 VITE_COGNITO_REGION=$AWS_REGION
+VITE_STRIPE_STARTER_PRICE_ID=price_1SxOjKEfxTA3ELQdJrIu309H
+VITE_STRIPE_PRO_PRICE_ID=price_1SxOjUEfxTA3ELQd8TLeT6br
 EOF
 
 echo "Generated frontend/.env.$ENV"
@@ -110,7 +124,7 @@ if [ "$SKIP_BACKEND" = false ]; then
   cd "$ROOT_DIR/backend"
 
   # Lambda関数をパッケージング
-  for func_dir in functions/generate-article functions/chat-edit functions/manage-settings functions/authorizer; do
+  for func_dir in functions/generate-article functions/chat-edit functions/manage-settings functions/authorizer functions/subscription functions/stripe-webhook; do
     if [ -d "$func_dir" ]; then
       func_name=$(basename $func_dir)
       echo "  Packaging $func_name..."
@@ -151,6 +165,12 @@ if [ "$SKIP_BACKEND" = false ]; then
           ;;
         authorizer)
           LAMBDA_NAME="blog-agent-authorizer-$ENV"
+          ;;
+        subscription)
+          LAMBDA_NAME="blog-agent-subscription-$ENV"
+          ;;
+        stripe-webhook)
+          LAMBDA_NAME="blog-agent-stripe-webhook-$ENV"
           ;;
       esac
 

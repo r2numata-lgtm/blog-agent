@@ -39,7 +39,13 @@ jobs:
           aws cloudformation deploy \
             --template-file infra/cloudformation.yaml \
             --stack-name blog-agent-${{ github.event.inputs.environment || 'production' }} \
-            --parameter-overrides Environment=${{ github.event.inputs.environment || 'production' }} \
+            --parameter-overrides \
+              Environment=${{ github.event.inputs.environment || 'production' }} \
+              ClaudeApiKey=${{ secrets.CLAUDE_API_KEY }} \
+              StripeSecretKey=${{ secrets.STRIPE_SECRET_KEY }} \
+              StripeWebhookSecret=${{ secrets.STRIPE_WEBHOOK_SECRET }} \
+              StripeStarterPriceId=${{ vars.STRIPE_STARTER_PRICE_ID }} \
+              StripeProPriceId=${{ vars.STRIPE_PRO_PRICE_ID }} \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
 
@@ -88,6 +94,9 @@ jobs:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           VITE_COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
           VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
+          VITE_STRIPE_PUBLISHABLE_KEY: ${{ vars.VITE_STRIPE_PUBLISHABLE_KEY }}
+          VITE_STRIPE_STARTER_PRICE_ID: ${{ vars.VITE_STRIPE_STARTER_PRICE_ID }}
+          VITE_STRIPE_PRO_PRICE_ID: ${{ vars.VITE_STRIPE_PRO_PRICE_ID }}
         run: npm run build
 
       - name: Configure AWS credentials
@@ -151,7 +160,7 @@ jobs:
           cd ..
 
           # Deploy Lambda functions
-          for func in generate-article chat-edit manage-settings; do
+          for func in generate-article chat-edit manage-settings subscription stripe-webhook; do
             aws lambda update-function-code \
               --function-name blog-agent-$func-${{ github.event.inputs.environment || 'production' }} \
               --zip-file fileb://deployment.zip \

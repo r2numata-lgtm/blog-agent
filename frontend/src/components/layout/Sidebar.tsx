@@ -1,5 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSubscription } from '../../contexts/SubscriptionContext';
+import PlanBadge from '../subscription/PlanBadge';
 
 interface NavItem {
   path: string;
@@ -54,11 +56,11 @@ const navItems: NavItem[] = [
     ),
   },
   {
-    path: '/upgrade',
-    label: 'プランアップグレード',
+    path: '/subscription/settings',
+    label: 'プラン管理',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
       </svg>
     ),
   },
@@ -67,6 +69,7 @@ const navItems: NavItem[] = [
 export const Sidebar = () => {
   const location = useLocation();
   const { user, signOut } = useAuth();
+  const { status: subscription } = useSubscription();
 
   const isActive = (path: string) => {
     if (path === '/') {
@@ -125,7 +128,14 @@ export const Sidebar = () => {
             <p className="text-sm font-medium text-gray-900 truncate">
               {user?.email || 'ユーザー'}
             </p>
-            <p className="text-xs text-gray-500">無料プラン</p>
+            {subscription ? (
+              <PlanBadge
+                planType={subscription.plan_type}
+                subscriptionStatus={subscription.subscription_status}
+              />
+            ) : (
+              <p className="text-xs text-gray-500">-</p>
+            )}
           </div>
         </div>
         <button

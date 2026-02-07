@@ -15,6 +15,28 @@ Parameters:
     NoEcho: true
     Description: Claude API Key for article generation
 
+  StripeSecretKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Stripe Secret Key for subscription management
+
+  StripeWebhookSecret:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Stripe Webhook Signing Secret
+
+  StripeStarterPriceId:
+    Type: String
+    Default: ''
+    Description: Stripe Price ID for Starter plan
+
+  StripeProPriceId:
+    Type: String
+    Default: ''
+    Description: Stripe Price ID for Pro plan
+
 Resources:
   # ===========================================
   # Cognito User Pool
@@ -212,9 +234,18 @@ Resources:
       AttributeDefinitions:
         - AttributeName: userId
           AttributeType: S
+        - AttributeName: stripe_customer_id
+          AttributeType: S
       KeySchema:
         - AttributeName: userId
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: stripe_customer_id-index
+          KeySchema:
+            - AttributeName: stripe_customer_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       Tags:
@@ -260,6 +291,71 @@ Resources:
           AttributeType: S
       KeySchema:
         - AttributeName: jobId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  # ===========================================
+  # DynamoDB Tables (Subscription)
+  # ===========================================
+  UsageTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'myblog-ai-usage-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: period_start
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+        - AttributeName: period_start
+          KeyType: RANGE
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  BillingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'myblog-ai-billing-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: stripe_invoice_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+        - AttributeName: stripe_invoice_id
+          KeyType: RANGE
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  WebhookEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'myblog-ai-webhook-events-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: stripe_event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: stripe_event_id
           KeyType: HASH
       TimeToLiveSpecification:
         AttributeName: ttl
@@ -318,8 +414,12 @@ Resources:
                   - !GetAtt ArticlesTable.Arn
                   - !Sub '${ArticlesTable.Arn}/index/*'
                   - !GetAtt SettingsTable.Arn
+                  - !Sub '${SettingsTable.Arn}/index/*'
                   - !GetAtt ConversationsTable.Arn
                   - !GetAtt JobsTable.Arn
+                  - !GetAtt UsageTable.Arn
+                  - !GetAtt BillingTable.Arn
+                  - !GetAtt WebhookEventsTable.Arn
         - PolicyName: SQSAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -451,6 +551,64 @@ Resources:
           Value: blog-agent
 
   # ===========================================
+  # Lambda Functions (Subscription)
+  # ===========================================
+  SubscriptionFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'blog-agent-subscription-${Environment}'
+      Runtime: python3.11
+      Handler: app.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          STRIPE_SECRET_KEY: !Ref StripeSecretKey
+          STRIPE_STARTER_PRICE_ID: !Ref StripeStarterPriceId
+          STRIPE_PRO_PRICE_ID: !Ref StripeProPriceId
+          DYNAMODB_TABLE_SETTINGS: !Ref SettingsTable
+          DYNAMODB_TABLE_USAGE: !Ref UsageTable
+          LOCAL_DEV: 'false'
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              return {'statusCode': 200, 'body': 'Placeholder - deploy actual code'}
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  StripeWebhookFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'blog-agent-stripe-webhook-${Environment}'
+      Runtime: python3.11
+      Handler: app.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          STRIPE_SECRET_KEY: !Ref StripeSecretKey
+          STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
+          DYNAMODB_TABLE_SETTINGS: !Ref SettingsTable
+          DYNAMODB_TABLE_USAGE: !Ref UsageTable
+          DYNAMODB_TABLE_BILLING: !Ref BillingTable
+          DYNAMODB_TABLE_WEBHOOK_EVENTS: !Ref WebhookEventsTable
+          LOCAL_DEV: 'false'
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              return {'statusCode': 200, 'body': 'Placeholder - deploy actual code'}
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: blog-agent
+
+  # ===========================================
   # API Gateway
   # ===========================================
   ApiGateway:
@@ -542,6 +700,22 @@ Resources:
       IntegrationUri: !GetAtt ManageSettingsFunction.Arn
       PayloadFormatVersion: '2.0'
 
+  SubscriptionIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt SubscriptionFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  StripeWebhookIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt StripeWebhookFunction.Arn
+      PayloadFormatVersion: '2.0'
+
   # ===========================================
   # API Gateway Routes
   # ===========================================
@@ -621,6 +795,61 @@ Resources:
       Target: !Sub 'integrations/${ManageSettingsIntegration}'
       AuthorizationType: NONE
 
+  # Subscription Routes (認証あり)
+  CreateCheckoutSessionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /api/stripe/create-checkout-session'
+      Target: !Sub 'integrations/${SubscriptionIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  CreatePortalSessionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /api/stripe/create-portal-session'
+      Target: !Sub 'integrations/${SubscriptionIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  ChangePlanRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /api/stripe/change-plan'
+      Target: !Sub 'integrations/${SubscriptionIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  SubscriptionStatusRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /api/subscription/status'
+      Target: !Sub 'integrations/${SubscriptionIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  SubscriptionUsageRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /api/subscription/usage'
+      Target: !Sub 'integrations/${SubscriptionIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+
+  # Stripe Webhook Route (認証なし - Stripe署名検証のみ)
+  StripeWebhookRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /api/stripe/webhook'
+      Target: !Sub 'integrations/${StripeWebhookIntegration}'
+      AuthorizationType: NONE
+
   # ===========================================
   # Lambda Permissions for API Gateway
   # ===========================================
@@ -644,6 +873,22 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref ManageSettingsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  SubscriptionFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SubscriptionFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  StripeWebhookFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref StripeWebhookFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
@@ -732,3 +977,33 @@ Outputs:
     Value: !GetAtt ManageSettingsFunction.Arn
     Export:
       Name: !Sub '${AWS::StackName}-ManageSettingsFunctionArn'
+
+  SubscriptionFunctionArn:
+    Description: Subscription Lambda Function ARN
+    Value: !GetAtt SubscriptionFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SubscriptionFunctionArn'
+
+  StripeWebhookFunctionArn:
+    Description: Stripe Webhook Lambda Function ARN
+    Value: !GetAtt StripeWebhookFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-StripeWebhookFunctionArn'
+
+  UsageTableName:
+    Description: Usage DynamoDB Table Name
+    Value: !Ref UsageTable
+    Export:
+      Name: !Sub '${AWS::StackName}-UsageTable'
+
+  BillingTableName:
+    Description: Billing DynamoDB Table Name
+    Value: !Ref BillingTable
+    Export:
+      Name: !Sub '${AWS::StackName}-BillingTable'
+
+  WebhookEventsTableName:
+    Description: Webhook Events DynamoDB Table Name
+    Value: !Ref WebhookEventsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-WebhookEventsTable'
